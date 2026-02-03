@@ -1,0 +1,66 @@
+# ==============================================================================
+# ROOT
+# ==============================================================================
+
+# Dependencies
+/node_modules/
+/.pnp
+.pnp.js
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# System Files
+.DS_Store
+Thumbs.db
+.generated/
+
+# Editor/IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Testing
+coverage/
+
+# ==============================================================================
+# CLIENT (Angular)
+# ==============================================================================
+
+/client/node_modules/
+/client/dist/
+/client/tmp/
+/client/out-tsc/
+/client/bazel-out/
+/client/connect.lock
+/client/typings
+/client/.angular/
+/client/.sass-cache/
+/client/testem.log
+/client/Stats.json
+/client/profile.json
+
+# ==============================================================================
+# SERVER (NestJS)
+# ==============================================================================
+
+/server/node_modules/
+/server/dist/
+/server/documentation/
+
