@@ -18,6 +18,9 @@ export class SupabaseService {
         // Initialize session
         this.supabase.auth.getSession().then(({ data: { session } }) => {
             this._currentUser.next(session?.user ?? null);
+        }).catch(error => {
+            console.error('Error initializing Supabase session:', error);
+            // Handle lock errors gracefully (usually due to multiple tabs)
         });
 
         // Listen to changes
@@ -58,5 +61,56 @@ export class SupabaseService {
 
     async createWorkspace(name: string, ownerId: string) {
         return this.supabase.from('workspaces').insert({ name, owner_id: ownerId });
+    }
+
+    /* Project Methods */
+
+    async getProjects() {
+        return this.supabase.from('projects').select('*').order('created_at', { ascending: false });
+    }
+
+    async getProject(id: string) {
+        return this.supabase.from('projects').select('*').eq('id', id).single();
+    }
+
+    async createProject(project: { title: string; description: string; cover_image: string; owner_id: string }) {
+        return this.supabase.from('projects').insert(project).select().single();
+    }
+
+    /* Task Methods */
+
+    async getTasks(projectId: string) {
+        return this.supabase.from('tasks').select('*').eq('project_id', projectId);
+    }
+
+    async createTask(task: { title: string; project_id: string; status: string; priority?: string }) {
+        return this.supabase.from('tasks').insert(task).select().single();
+    }
+
+    async updateTaskStatus(taskId: string, status: string) {
+        return this.supabase.from('tasks').update({ status }).eq('id', taskId);
+    }
+
+    /* Activity Log Methods */
+
+    async getLogs(projectId: string) {
+        return this.supabase
+            .from('activity_logs')
+            .select(`
+                *,
+                user:user_id (email)
+            `)
+            .eq('project_id', projectId)
+            .order('created_at', { ascending: false })
+            .limit(20);
+    }
+
+    async createLog(log: {
+        project_id: string;
+        user_id: string;
+        action: string;
+        details: any
+    }) {
+        return this.supabase.from('activity_logs').insert(log);
     }
 }

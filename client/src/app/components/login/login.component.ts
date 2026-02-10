@@ -100,7 +100,7 @@ export class LoginComponent {
       } else {
         const { error } = await this.supabase.signIn(email, password);
         if (error) throw error;
-        void this.router.navigate(['/board']);
+        void this.router.navigate(['/projects']);
       }
     } catch (error: any) {
       this.isError = true;
