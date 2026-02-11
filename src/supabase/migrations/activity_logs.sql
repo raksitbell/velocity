@@ -3,6 +3,7 @@ create table activity_logs (
   id uuid default uuid_generate_v4() primary key,
   project_id uuid references projects(id) not null,
   user_id uuid references auth.users(id) not null,
+  user_email text,
   action text not null, -- 'create', 'move', 'delete'
   details jsonb not null default '{}'::jsonb, -- e.g. { "task_title": "Fix bug", "from_status": "todo", "to_status": "in-progress" }
   created_at timestamp with time zone default timezone('utc'::text, now()) not null

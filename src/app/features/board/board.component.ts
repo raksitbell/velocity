@@ -5,6 +5,7 @@ import { SupabaseService } from '../../core/services/supabase.service';
 import { Router, ActivatedRoute, RouterModule } from '@angular/router';
 import { LucideAngularModule, Menu, Search, Lock, Star, MoreHorizontal, Info, Kanban, ChartGantt, User, Filter, ArrowUpDown, Zap, ChevronDown, Plus, FileText, HelpCircle, X } from 'lucide-angular';
 import { ModalComponent } from '../../shared/ui/modal/modal.component';
+import { TaskDetailModalComponent } from './components/task-detail-modal/task-detail-modal.component';
 import { FormsModule } from '@angular/forms';
 
 interface Task {
@@ -14,6 +15,8 @@ interface Task {
     status: string;
     priority?: string;
     progress?: number;
+    tags?: any[]; // For eager loaded tags
+    task_tags?: any[]; // For join structure
 }
 
 interface Column {
@@ -33,6 +36,7 @@ interface Column {
         RouterModule,
         LucideAngularModule,
         ModalComponent,
+        TaskDetailModalComponent,
         FormsModule
     ],
     template: `
@@ -44,6 +48,47 @@ interface Column {
                 <lucide-icon name="plus" class="w-4 h-4"></lucide-icon>
                 New Task
             </button>
+        </div>
+
+
+        <!-- Activity Log -->
+        <div class="mb-8 border-b border-zinc-800 pb-6 max-w-3xl">
+            <h3 class="text-sm font-medium text-zinc-400 mb-4 flex items-center gap-2">
+                <lucide-icon name="history" class="w-4 h-4"></lucide-icon>
+                Activity
+            </h3>
+            <div class="space-y-4">
+                @for (log of logs(); track log.id) {
+                <div class="flex gap-3 text-sm group">
+                    <div class="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-xs text-zinc-400 shrink-0 select-none">
+                        {{ log.user_email?.[0] | uppercase }}
+                    </div>
+                    <div>
+                        <div class="text-zinc-400">
+                            <span class="text-zinc-300 font-medium hover:underline cursor-pointer">{{ log.user_email }}</span>
+                            <span class="ml-1">
+                                <ng-container [ngSwitch]="log.action">
+                                    <span *ngSwitchCase="'create'">created task <span class="text-zinc-200 font-medium">"{{ log.details.task_title }}"</span> in <span class="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 text-xs">{{ log.details.status }}</span></span>
+                                    <span *ngSwitchCase="'move'">moved <span class="text-zinc-200 font-medium">"{{ log.details.task_title }}"</span> to <span class="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 text-xs">{{ log.details.to_status }}</span> column</span>
+                                </ng-container>
+                            </span>
+                        </div>
+                        <div class="text-[11px] text-zinc-600 mt-0.5">{{ log.created_at | date:'medium' }}</div>
+                    </div>
+                </div>
+                }
+                @if (logs().length === 0) {
+                <div class="text-zinc-600 text-sm italic py-4">No recent activity</div>
+                }
+            </div>
+            
+            @if (logs().length >= 5 || showAllLogs()) {
+            <div class="mt-4">
+                <button (click)="toggleLogs()" class="text-xs font-medium text-zinc-500 hover:text-zinc-300 transition-colors">
+                    {{ showAllLogs() ? 'Show less' : 'View full details' }}
+                </button>
+            </div>
+            }
         </div>
 
         <!-- Kanban Board -->
@@ -70,6 +115,7 @@ interface Column {
                 @for (task of col.tasks; track task.id) {
                 <div 
                         cdkDrag 
+                        (click)="openTaskDetail(task)"
                         class="bg-notion-card hover:bg-notion-hover border border-notion-border rounded-md shadow-sm p-3 cursor-pointer group transition-all">
                         
                     <div class="flex items-start gap-2 mb-4">
@@ -119,37 +165,7 @@ interface Column {
 
 
 
-        <!-- Activity Log -->
-        <div class="mt-8 border-t border-zinc-800 pt-6 max-w-3xl">
-            <h3 class="text-sm font-medium text-zinc-400 mb-4 flex items-center gap-2">
-                <lucide-icon name="history" class="w-4 h-4"></lucide-icon>
-                Activity
-            </h3>
-            <div class="space-y-4">
-                @for (log of logs(); track log.id) {
-                <div class="flex gap-3 text-sm group">
-                    <div class="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-xs text-zinc-400 shrink-0 select-none">
-                        {{ log.user?.email?.[0] | uppercase }}
-                    </div>
-                    <div>
-                        <div class="text-zinc-400">
-                            <span class="text-zinc-300 font-medium hover:underline cursor-pointer">{{ log.user?.email }}</span>
-                            <span class="ml-1">
-                                <ng-container [ngSwitch]="log.action">
-                                    <span *ngSwitchCase="'create'">created task <span class="text-zinc-200 font-medium">"{{ log.details.task_title }}"</span> in <span class="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 text-xs">{{ log.details.status }}</span></span>
-                                    <span *ngSwitchCase="'move'">moved <span class="text-zinc-200 font-medium">"{{ log.details.task_title }}"</span> to <span class="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 text-xs">{{ log.details.to_status }}</span> column</span>
-                                </ng-container>
-                            </span>
-                        </div>
-                        <div class="text-[11px] text-zinc-600 mt-0.5">{{ log.created_at | date:'medium' }}</div>
-                    </div>
-                </div>
-                }
-                @if (logs().length === 0) {
-                <div class="text-zinc-600 text-sm italic py-4">No recent activity</div>
-                }
-            </div>
-        </div>
+
     </div>
 
 
@@ -167,6 +183,15 @@ interface Column {
             </div>
         </div>
     </app-modal>
+
+    <!-- Task Detail Modal -->
+    <app-task-detail-modal 
+        [isOpen]="!!selectedTask()" 
+        (isOpenChange)="selectedTask.set(null)"
+        [task]="selectedTask()"
+        [projectId]="projectId"
+        (taskUpdated)="loadTasks()">
+    </app-task-detail-modal>
     
   `,
     styles: [`
@@ -204,11 +229,13 @@ export class BoardComponent implements OnInit, OnChanges {
 
     // Modal State
     isTaskModalOpen = signal(false);
+    selectedTask = signal<Task | null>(null);
     newTaskTitle = signal('');
     activeColumnId = signal('todo');
 
     // Activity Logs
     logs = signal<any[]>([]);
+    showAllLogs = signal(false);
 
     constructor(
         private supabase: SupabaseService,
@@ -269,16 +296,30 @@ export class BoardComponent implements OnInit, OnChanges {
 
     async loadLogs() {
         if (!this.projectId) return;
-        const { data, error } = await this.supabase.getLogs(this.projectId);
+        const limit = this.showAllLogs() ? 50 : 5;
+        const { data, error } = await this.supabase.getLogs(this.projectId, limit);
+        if (error) {
+            console.error('Error loading logs:', error);
+        }
         if (data) {
+            console.log('Logs loaded:', data);
             this.logs.set(data);
         }
+    }
+
+    toggleLogs() {
+        this.showAllLogs.update(v => !v);
+        this.loadLogs();
     }
 
     addTask(columnId: string) {
         this.activeColumnId.set(columnId);
         this.newTaskTitle.set('');
         this.isTaskModalOpen.set(true);
+    }
+
+    openTaskDetail(task: Task) {
+        this.selectedTask.set(task);
     }
 
     async confirmAddTask() {
@@ -317,6 +358,7 @@ export class BoardComponent implements OnInit, OnChanges {
                 await this.supabase.createLog({
                     project_id: this.projectId,
                     user_id: user.id,
+                    user_email: user.email,
                     action: 'create',
                     details: { task_title: title, status: columnId }
                 });
@@ -344,10 +386,6 @@ export class BoardComponent implements OnInit, OnChanges {
             // Update DB
             const cols = this.columns();
             const destColumn = cols.find(c => c.tasks === event.container.data);
-            // Actually event.previousContainer.data is the array. 
-            // We can find the column that has this array as its 'tasks' property? 
-            // Wait, if we transferred, the array is mutated. 
-            // But we can infer status from column ID.
 
             if (destColumn && event.container.data[event.currentIndex]) {
                 const task = event.container.data[event.currentIndex];
@@ -356,12 +394,10 @@ export class BoardComponent implements OnInit, OnChanges {
                 // Log activity
                 const { data: { user } } = await this.supabase.client.auth.getUser();
                 if (user) {
-                    // We need previous status. 
-                    // Since we don't have easy access to source column ID here unless we reverse lookup based on previousContainer (which might be empty now), 
-                    // let's just log "moved to [dest]"
                     await this.supabase.createLog({
                         project_id: this.projectId!,
                         user_id: user.id,
+                        user_email: user.email,
                         action: 'move',
                         details: {
                             task_title: task.title,

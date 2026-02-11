@@ -80,7 +80,13 @@ export class SupabaseService {
     /* Task Methods */
 
     async getTasks(projectId: string) {
-        return this.supabase.from('tasks').select('*').eq('project_id', projectId);
+        return this.supabase.from('tasks').select(`
+            *,
+            assignee:assignee_id(email),
+            task_tags(
+                tag:tags(*)
+            )
+        `).eq('project_id', projectId);
     }
 
     async createTask(task: { title: string; project_id: string; status: string; priority?: string }) {
@@ -93,24 +99,59 @@ export class SupabaseService {
 
     /* Activity Log Methods */
 
-    async getLogs(projectId: string) {
-        return this.supabase
+    async getLogs(projectId: string, limit = 5) {
+        console.log('Fetching logs for project:', projectId, 'limit:', limit);
+        const result = await this.supabase
             .from('activity_logs')
-            .select(`
-                *,
-                user:user_id (email)
-            `)
+            .select('*')
             .eq('project_id', projectId)
             .order('created_at', { ascending: false })
-            .limit(20);
+            .limit(limit);
+
+        console.log('Log fetch result:', result);
+        return result;
     }
 
     async createLog(log: {
         project_id: string;
         user_id: string;
+        user_email?: string;
         action: string;
         details: any
     }) {
         return this.supabase.from('activity_logs').insert(log);
+    }
+
+    /* Task Update Method */
+    async updateTask(id: string, updates: any) {
+        return this.supabase.from('tasks').update(updates).eq('id', id);
+    }
+
+    /* Tag Methods */
+
+    async getTags(projectId: string) {
+        return this.supabase.from('tags').select('*').eq('project_id', projectId);
+    }
+
+    async createTag(tag: { project_id: string; name: string; color: string }) {
+        return this.supabase.from('tags').insert(tag).select().single();
+    }
+
+    async addTaskTag(taskId: string, tagId: string) {
+        return this.supabase.from('task_tags').insert({ task_id: taskId, tag_id: tagId });
+    }
+
+    async removeTaskTag(taskId: string, tagId: string) {
+        return this.supabase.from('task_tags').delete().match({ task_id: taskId, tag_id: tagId });
+    }
+
+    /* Storage Methods */
+
+    async uploadFile(file: File, path: string) {
+        return this.supabase.storage.from('task-attachments').upload(path, file);
+    }
+
+    async getPublicUrl(path: string) {
+        return this.supabase.storage.from('task-attachments').getPublicUrl(path);
     }
 }
