@@ -1,66 +1,42 @@
-# ==============================================================================
-# ROOT
-# ==============================================================================
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# Dependencies
-/node_modules/
+# dependencies
+/node_modules
 /.pnp
-.pnp.js
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
 
-# Environment Variables
-.env
-.env.local
-.env.*.local
-.env.development.local
-.env.test.local
-.env.production.local
+# testing
+/coverage
 
-# Logs
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+.pnpm-debug.log*
 
-# System Files
-.DS_Store
-Thumbs.db
-.generated/
+# env files (can opt-in for committing if needed)
+.env*
 
-# Editor/IDE
-.vscode/
-.idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+# vercel
+.vercel
 
-# Testing
-coverage/
-
-# ==============================================================================
-# CLIENT (Angular)
-# ==============================================================================
-
-/client/node_modules/
-/client/dist/
-/client/tmp/
-/client/out-tsc/
-/client/bazel-out/
-/client/connect.lock
-/client/typings
-/client/.angular/
-/client/.sass-cache/
-/client/testem.log
-/client/Stats.json
-/client/profile.json
-
-# ==============================================================================
-# SERVER (NestJS)
-# ==============================================================================
-
-/server/node_modules/
-/server/dist/
-/server/documentation/
-
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+node_modules

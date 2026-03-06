@@ -1,0 +1,473 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { Asteroid } from "@/services/nasaService";
+import { motion, AnimatePresence } from "framer-motion";
+import { Play, Pause, RotateCcw, Crosshair, MapPin, Flame, Skull, Waves, ArrowRight, Target } from "lucide-react";
+import { format } from "date-fns";
+import * as THREE from "three";
+import { calculateImpactMetrics, ImpactMetrics } from "@/lib/impactCalculator";
+import { IsometricImpactMap } from "./IsometricImpactMap";
+
+interface SimulationControlsProps {
+  selectedAsteroid: Asteroid | null;
+  isPlaying: boolean;
+  setIsPlaying: (val: boolean) => void;
+  progress: number; // 0 to 1
+  setProgress: (val: number) => void;
+  onReset: () => void;
+  customImpactPoint?: THREE.Vector3 | null;
+}
+
+export function SimulationControls({
+  selectedAsteroid,
+  isPlaying,
+  setIsPlaying,
+  progress,
+  setProgress,
+  onReset,
+  customImpactPoint
+}: SimulationControlsProps) {
+  const [metrics, setMetrics] = useState<ImpactMetrics | null>(null);
+  const [locationName, setLocationName] = useState<string>("Calculating...");
+  
+  type TabId = 'overview' | 'thermal' | 'blast' | 'casualties' | 'crater' | 'seismic' | 'tsunami';
+  const [activeTab, setActiveTab] = useState<TabId>('overview');
+  
+  const TABS: {id: TabId, label: string}[] = [
+    { id: 'overview',   label: 'Overview' },
+    { id: 'thermal',    label: 'Thermal' },
+    { id: 'blast',      label: 'Wave Blast' },
+    { id: 'casualties', label: 'Life Effects' },
+    { id: 'crater',     label: 'Crater' },
+    { id: 'seismic',    label: 'Seismic' },
+    { id: 'tsunami',    label: 'Tsunami' },
+  ];
+
+  // Derive simulation dates based on progress
+  useEffect(() => {
+    if (!selectedAsteroid) return;
+
+    // Only calc metrics exactly at impact to save performance
+    if (progress >= 1 && !metrics) {
+      const seed = selectedAsteroid.id.length;
+      const endX = Math.cos(seed) * 2.1;
+      const endY = Math.sin(seed) * 2.1;
+      const endZ = Math.cos(seed + 1) * 2.1;
+      const impactPoint = customImpactPoint || new THREE.Vector3(endX, endY, endZ);
+      
+      const m = calculateImpactMetrics(selectedAsteroid, impactPoint, 2.0);
+      setMetrics(m);
+
+      // Fetch real-world location data via open-source API
+      setLocationName("Calculating...");
+      fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${m.lat}&longitude=${m.lon}&localityLanguage=en`)
+        .then(res => res.json())
+        .then(data => {
+            const loc = data.city || data.locality || data.principalSubdivision || data.countryName;
+            if (loc) {
+               setLocationName(`${loc}, ${data.countryCode || ''}`);
+            } else {
+               setLocationName(m.isWater ? "Open Ocean" : "Remote Landmass");
+            }
+        })
+        .catch(() => setLocationName("Unknown Zone"));
+
+
+    } else if (progress < 1 && metrics) {
+      setMetrics(null);
+      setLocationName("");
+    }
+  }, [progress, selectedAsteroid, metrics]);
+
+  if (!selectedAsteroid) return null;
+
+  const approachDateStr = selectedAsteroid.close_approach_data?.[0]?.close_approach_date;
+  const approachDate = approachDateStr ? new Date(approachDateStr) : new Date();
+  if (isNaN(approachDate.getTime())) approachDate.setTime(Date.now());
+  
+  const startDate = new Date(approachDate);
+  startDate.setDate(startDate.getDate() - 30);
+  const currentDate = new Date(startDate.getTime() + (approachDate.getTime() - startDate.getTime()) * progress);
+
+  // Mobile: hide entirely during animation, slide up as bottom sheet after impact
+  // Desktop: always show as right panel
+  const mobileClass = progress >= 1
+    ? "fixed bottom-0 left-0 right-0 max-h-[75vh] md:max-h-none w-full rounded-t-2xl md:rounded-none md:top-0 md:right-0 md:bottom-auto md:left-auto md:h-full md:w-[450px]"
+    : "hidden md:flex md:fixed md:top-0 md:right-0 md:h-full md:w-[450px]";
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ y: 60, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 60, opacity: 0 }}
+        className={`${mobileClass} bg-black/60 backdrop-blur-2xl border-l border-white/10 md:border-t-0 border-t z-30 flex flex-col shadow-2xl overflow-hidden`}
+      >
+        {/* Header */}
+        <div className="p-6 border-b border-white/10 flex items-center justify-between shrink-0 bg-black/40">
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${progress >= 1 ? 'bg-red-500/20 text-red-400' : 'bg-cyan-500/20 text-cyan-400'}`}>
+              <Crosshair className={`w-5 h-5 ${progress < 1 ? 'animate-pulse' : ''}`} />
+            </div>
+            <div>
+              <h3 className="text-white font-bold">{selectedAsteroid.name}</h3>
+              <p className={`text-xs md:text-sm font-medium ${progress >= 1 ? 'text-red-400' : 'text-zinc-400'}`}>
+                {progress >= 1 ? 'IMPACT CONFIRMED / DEVASTATION REPORT' : 'Target Locked • Simulating Trajectory'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Playback Controls (Timeline) */}
+        <div className="p-6 border-b border-white/10 bg-black/20 shrink-0">
+          <div className="flex items-center justify-between mb-4">
+            <div className="text-zinc-400 text-xs uppercase tracking-wider font-semibold">Timeline Scrubber</div>
+            <div className={`font-mono text-sm font-bold ${progress >=1 ? 'text-red-400' : 'text-white'}`}>{format(currentDate, "MMM dd, yyyy")}</div>
+          </div>
+          
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setIsPlaying(!isPlaying)}
+              disabled={progress >= 1}
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors shrink-0 ${
+                progress >= 1 
+                  ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed' 
+                  : 'bg-white text-black hover:bg-zinc-200'
+              }`}
+            >
+              {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-1" />}
+            </button>
+            <button
+              onClick={onReset}
+              className="w-8 h-8 rounded-full border border-white/20 text-white flex items-center justify-center hover:bg-white/10 transition-colors shrink-0"
+              title="Reset Simulation"
+            >
+              <RotateCcw className="w-3 h-3" />
+            </button>
+
+            <div className="relative flex-1 group">
+              <input 
+                type="range" 
+                min="0" 
+                max="1" 
+                step="0.001" 
+                value={progress}
+                onChange={(e) => {
+                  setIsPlaying(false);
+                  setProgress(parseFloat(e.target.value));
+                }}
+                className={`w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:scale-125 transition-all ${
+                  progress >= 1 ? '[&::-webkit-slider-thumb]:bg-red-500' : '[&::-webkit-slider-thumb]:bg-cyan-500'
+                }`}
+              />
+              <div 
+                className={`absolute top-1/2 -translate-y-1/2 left-0 h-1.5 rounded-l-lg pointer-events-none ${
+                  progress >= 1 ? 'bg-gradient-to-r from-red-600 to-red-400' : 'bg-gradient-to-r from-cyan-500 to-blue-500'
+                }`}
+                style={{ width: `${progress * 100}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Tabbed Interface - only when metrics are calculated */}
+        {progress >= 1 && metrics && (
+          <div className="flex flex-col flex-1 overflow-hidden">
+            {/* Nav Tabs */}
+            <div className="flex border-b border-white/10 shrink-0">
+              {TABS.map(tab => (
+                <button 
+                  key={tab.id} 
+                  onClick={() => setActiveTab(tab.id)} 
+                  className={`flex-1 py-3 px-1 text-[10px] md:text-xs font-bold uppercase tracking-wider text-center transition-colors border-b-2 ${
+                    activeTab === tab.id 
+                      ? 'border-cyan-500 text-cyan-400 bg-cyan-500/5' 
+                      : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-white/5'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Scrollable Tab Content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4 scrollbar-thin scrollbar-thumb-white/10">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeTab}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.2 }}
+                  className="flex flex-col gap-4"
+                >
+                  {activeTab === 'overview' && (
+                    <>
+                      {/* 2D Map */}
+                      <div className="w-full relative">
+                        <div className="absolute top-2 left-2 z-50 bg-black/60 backdrop-blur-md px-3 py-1 rounded-md border border-cyan-500/30 text-xs font-mono text-cyan-400 font-bold tracking-widest uppercase pointer-events-none">
+                          Tactical Impact Map
+                        </div>
+                        <IsometricImpactMap lat={metrics.lat} lon={metrics.lon} isWater={metrics.isWater} />
+                      </div>
+
+                      {/* Ground Zero */}
+                      <div className="bg-red-950/30 p-4 rounded-xl border border-red-500/20">
+                        <div className="flex items-center gap-2 text-red-400 mb-2">
+                          <MapPin className="w-4 h-4" />
+                          <span className="text-xs font-bold uppercase tracking-wider">Ground Zero</span>
+                        </div>
+                        <div className="text-lg text-white font-bold truncate" title={locationName}>{locationName}</div>
+                        <div className="text-sm text-zinc-400 font-mono mt-1">
+                          {Math.abs(metrics.lat).toFixed(4)}°{metrics.lat >= 0 ? 'N' : 'S'},{' '}
+                          {Math.abs(metrics.lon).toFixed(4)}°{metrics.lon >= 0 ? 'E' : 'W'}
+                        </div>
+                      </div>
+
+                      {/* Key stats grid */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-orange-950/30 p-3 rounded-xl border border-orange-500/20">
+                          <div className="text-zinc-500 text-[10px] uppercase tracking-wider mb-1">Energy (TNT)</div>
+                          <div className="text-white font-mono font-bold text-lg">
+                            {metrics.kineticEnergyMegatons > 1000
+                              ? (metrics.kineticEnergyMegatons / 1000).toFixed(2) + ' GT'
+                              : metrics.kineticEnergyMegatons.toFixed(1) + ' MT'}
+                          </div>
+                        </div>
+                        <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-700">
+                          <div className="text-zinc-500 text-[10px] uppercase tracking-wider mb-1">Diameter</div>
+                          <div className="text-white font-mono font-bold text-lg">
+                            {metrics.originalDiameterKm >= 1
+                              ? metrics.originalDiameterKm.toFixed(2) + ' km'
+                              : (metrics.originalDiameterKm * 1000).toFixed(0) + ' m'}
+                          </div>
+                        </div>
+                        <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-700">
+                          <div className="text-zinc-500 text-[10px] uppercase tracking-wider mb-1">Velocity</div>
+                          <div className="text-white font-mono font-bold text-lg">
+                            {(parseFloat(selectedAsteroid.close_approach_data[0]?.relative_velocity.kilometers_per_hour || '0') / 3600).toFixed(1)} km/s
+                          </div>
+                        </div>
+                        <div className="bg-zinc-900 p-3 rounded-xl border border-zinc-700">
+                          <div className="text-zinc-500 text-[10px] uppercase tracking-wider mb-1">Recurrence</div>
+                          <div className="text-white font-mono font-bold text-lg">
+                            {metrics.recurrencePeriodYears > 1e6
+                              ? (metrics.recurrencePeriodYears / 1e6).toFixed(1) + ' Myr'
+                              : metrics.recurrencePeriodYears > 1000
+                              ? (metrics.recurrencePeriodYears / 1000).toFixed(1) + ' kyr'
+                              : metrics.recurrencePeriodYears + ' yr'}
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {activeTab === 'thermal' && (
+                    <>
+                      <div className="bg-purple-950/30 p-4 rounded-xl border border-purple-500/20">
+                        <div className="flex items-center gap-2 text-purple-400 mb-2">
+                          <Flame className="w-4 h-4" />
+                          <span className="text-xs font-bold uppercase tracking-wider">Atmospheric Ablation</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4 mt-3">
+                          <div>
+                            <div className="text-zinc-500 text-xs">Exo-Atmosphere</div>
+                            <div className="text-purple-300 font-mono mt-1">{(metrics.originalDiameterKm * 1000).toFixed(0)}m</div>
+                          </div>
+                          <div>
+                            <div className="text-zinc-500 text-xs">Ground Impact</div>
+                            <div className="text-red-400 font-mono mt-1">{(metrics.finalDiameterKm * 1000).toFixed(0)}m</div>
+                          </div>
+                        </div>
+                        <div className="mt-4 pt-3 border-t border-purple-800/50 flex justify-between items-center text-sm">
+                          <span className="text-zinc-400">Mass Destroyed</span>
+                          <span className="text-white font-mono">{metrics.burnPercentage.toFixed(1)}%</span>
+                        </div>
+                      </div>
+
+                      <div className="bg-red-950/30 p-4 rounded-xl border border-red-500/20">
+                        <div className="flex items-center gap-2 text-red-500 mb-2">
+                          <Flame className="w-4 h-4" />
+                          <span className="text-xs font-bold uppercase tracking-wider">Thermal Pulse / Fireball</span>
+                        </div>
+                        <div className="text-2xl text-white font-mono mt-2 text-red-400">
+                          {metrics.fireballRadiusKm.toFixed(1)} km
+                        </div>
+                        <p className="text-xs text-zinc-500 mt-2">Radius of 3rd degree burns and spontaneous combustion.</p>
+                      </div>
+                    </>
+                  )}
+
+                  {activeTab === 'blast' && (
+                    <>
+                      {metrics.isWater ? (
+                        <div className="bg-blue-950/30 p-4 rounded-xl border border-blue-500/20">
+                          <div className="flex items-center gap-2 text-blue-400 mb-2">
+                            <Waves className="w-4 h-4" />
+                            <span className="text-xs font-bold uppercase tracking-wider">Tsunami Wave Height</span>
+                          </div>
+                          <div className="text-2xl text-white font-mono mt-2 text-blue-400">
+                            {metrics.tsunamiHeightMeters.toFixed(0)} meters
+                          </div>
+                          <p className="text-xs text-zinc-500 mt-2">Maximum displaced water wave height upon deep impact.</p>
+                        </div>
+                      ) : (
+                        <div className="bg-yellow-950/30 p-4 rounded-xl border border-yellow-500/20">
+                          <div className="flex items-center gap-2 text-yellow-400 mb-2">
+                            <ArrowRight className="w-4 h-4" />
+                            <span className="text-xs font-bold uppercase tracking-wider">Evacuation / Shockwave</span>
+                          </div>
+                          <div className="text-2xl text-white font-mono mt-2 text-yellow-500">
+                            {metrics.evacuationRadiusKm >= 1 ? metrics.evacuationRadiusKm.toFixed(1) : '< 1'} km
+                          </div>
+                          <p className="text-xs text-zinc-500 mt-2">Radius of structural collapse and deadly overpressure.</p>
+                        </div>
+                      )}
+
+                      <div className="bg-zinc-900/80 p-4 rounded-xl border border-zinc-700">
+                         <div className="flex items-center gap-2 text-zinc-400 mb-2">
+                            <Target className="w-4 h-4" />
+                            <span className="text-xs font-bold uppercase tracking-wider">Crater Diameter</span>
+                          </div>
+                          <div className="text-xl text-white font-mono mt-1 text-zinc-300">
+                            {metrics.craterDiameterKm.toFixed(2)} km
+                          </div>
+                      </div>
+                    </>
+                  )}
+
+                  {activeTab === 'casualties' && (
+                    <div className="bg-red-950/40 p-6 rounded-xl border border-red-500/30 flex flex-col items-center justify-center text-center">
+                      <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center mb-4 border border-red-500/50 shadow-[0_0_30px_rgba(239,68,68,0.4)]">
+                        <Skull className="w-8 h-8 text-red-500" />
+                      </div>
+                      <h4 className="text-red-400 font-bold uppercase tracking-widest text-sm mb-2">Estimated Casualties</h4>
+                      <div className="text-4xl text-white font-mono font-bold tracking-tight">
+                        {metrics.estimatedCasualties > 1000000000
+                          ? (metrics.estimatedCasualties / 1000000000).toFixed(2) + ' B'
+                          : metrics.estimatedCasualties > 1000000
+                          ? (metrics.estimatedCasualties / 1000000).toFixed(2) + ' M'
+                          : metrics.estimatedCasualties.toLocaleString()}
+                      </div>
+                      <p className="text-xs text-zinc-400 mt-4 leading-relaxed max-w-xs">
+                        {metrics.isWater
+                          ? 'Calculated based on coastal proximity and tsunami attenuation models.'
+                          : 'Based on population density within the 5 psi overpressure shockwave radius.'}
+                      </p>
+                    </div>
+                  )}
+
+                  {activeTab === 'crater' && (
+                    <>
+                      <div className="bg-amber-950/30 p-4 rounded-xl border border-amber-600/30">
+                        <div className="text-amber-400 text-xs font-bold uppercase tracking-wider mb-3">Crater Dimensions</div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <div className="text-zinc-500 text-xs">Diameter</div>
+                            <div className="text-white font-mono text-xl mt-1">{metrics.craterDiameterKm.toFixed(2)} km</div>
+                          </div>
+                          <div>
+                            <div className="text-zinc-500 text-xs">Depth (est.)</div>
+                            <div className="text-white font-mono text-xl mt-1">{(metrics.craterDiameterKm * 0.1).toFixed(2)} km</div>
+                          </div>
+                          <div>
+                            <div className="text-zinc-500 text-xs">Rim Radius</div>
+                            <div className="text-white font-mono text-xl mt-1">{(metrics.craterDiameterKm * 0.6).toFixed(2)} km</div>
+                          </div>
+                          <div>
+                            <div className="text-zinc-500 text-xs">Ejecta Blanket</div>
+                            <div className="text-white font-mono text-xl mt-1">{(metrics.craterDiameterKm * 2.5).toFixed(1)} km</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="bg-zinc-900 p-4 rounded-xl border border-zinc-700 text-xs text-zinc-400 leading-relaxed">
+                        Impact crater scaled using the <span className="text-white">Pi-group scaling law</span>. Depth estimates assume rocky terrain at 45° angle of impact.
+                      </div>
+                    </>
+                  )}
+
+                  {activeTab === 'seismic' && (
+                    <>
+                      <div className="bg-green-950/30 p-4 rounded-xl border border-green-600/30">
+                        <div className="text-green-400 text-xs font-bold uppercase tracking-wider mb-3">Seismic Activity</div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <div className="text-zinc-500 text-xs">Richter Magnitude</div>
+                            <div className="text-white font-mono text-3xl mt-1">M {metrics.richterMagnitude.toFixed(1)}</div>
+                          </div>
+                          <div>
+                            <div className="text-zinc-500 text-xs">Seismic Radius</div>
+                            <div className="text-white font-mono text-xl mt-1">
+                              {metrics.seismicRadiusKm > 1000
+                                ? (metrics.seismicRadiusKm / 1000).toFixed(1) + ' Mm'
+                                : metrics.seismicRadiusKm.toFixed(0) + ' km'}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-4 pt-3 border-t border-green-900/50">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-zinc-500">Intensity Class</span>
+                            <span className="text-white font-mono">
+                              {metrics.richterMagnitude >= 9 ? 'Extreme / Extinction Level'
+                                : metrics.richterMagnitude >= 8 ? 'Great Earthquake'
+                                : metrics.richterMagnitude >= 7 ? 'Major Earthquake'
+                                : metrics.richterMagnitude >= 6 ? 'Strong Earthquake'
+                                : 'Moderate'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="bg-zinc-900 p-4 rounded-xl border border-zinc-700 text-xs text-zinc-400 leading-relaxed">
+                        Seismic magnitude derived from impact kinetic energy using the <span className="text-white">Collins-Melosh energy-magnitude scaling relation</span>.
+                      </div>
+                    </>
+                  )}
+
+                  {activeTab === 'tsunami' && (
+                    <>
+                      <div className={`p-4 rounded-xl border ${
+                        metrics.isWater
+                          ? 'bg-blue-950/30 border-blue-600/30'
+                          : 'bg-zinc-900 border-zinc-700'
+                      }`}>
+                        <div className={`text-xs font-bold uppercase tracking-wider mb-3 ${
+                          metrics.isWater ? 'text-blue-400' : 'text-zinc-500'
+                        }`}>Oceanic Tsunami</div>
+                        {metrics.isWater ? (
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <div className="text-zinc-500 text-xs">Max Wave Height</div>
+                              <div className="text-white font-mono text-xl mt-1">{metrics.tsunamiHeightMeters.toFixed(0)} m</div>
+                            </div>
+                            <div>
+                              <div className="text-zinc-500 text-xs">Reach Estimate</div>
+                              <div className="text-white font-mono text-xl mt-1">{(metrics.evacuationRadiusKm * 0.4).toFixed(0)} km</div>
+                            </div>
+                            <div className="col-span-2 pt-3 border-t border-blue-900/50">
+                              <div className="text-xs text-zinc-400 leading-relaxed">
+                                Ocean impact generates mega-tsunami. Coastal zones within reach are at extreme risk.
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-zinc-500 text-sm py-4 text-center">
+                            Land impact — no direct tsunami generated.
+                            <br/>
+                            <span className="text-xs mt-2 block">Secondary effects from river/lake displacement possible.</span>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          </div>
+        )}
+
+      </motion.div>
+    </AnimatePresence>
+  );
+}
