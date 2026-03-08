@@ -27,6 +27,15 @@ export function FlightTelemetryHUD({ selectedAsteroid, progress, impactPoint, as
       .catch(() => setImpactCity("Unknown Zone"));
   }, [impactPoint?.lat, impactPoint?.lon]);
 
+  // ── Smart Positioning (Hooks must be before early returns) ──
+  const [bounds, setBounds] = useState({ w: 1000, h: 1000, isMobile: false });
+  useEffect(() => {
+    const update = () => setBounds({ w: window.innerWidth, h: window.innerHeight, isMobile: window.innerWidth < 768 });
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
   // Only render during actual flight
   if (progress <= 0 || progress >= 1) return null;
 
@@ -59,13 +68,47 @@ export function FlightTelemetryHUD({ selectedAsteroid, progress, impactPoint, as
     : massKg > 1e6 ? (massKg / 1e6).toFixed(1) + " Mt"
     : (massKg / 1e3).toFixed(1) + " Kt";
 
-  // ── Positioning ───────────────────────────────────────────
-  const OFFSET_X = 20;
-  const OFFSET_Y = -90;
+  // ── Smart Positioning ───────────────────────────────────────
+  const HUD_W = 210;
+  const HUD_H = 180;
+  
+  let left = asteroidScreenPos?.x ? asteroidScreenPos.x + 20 : bounds.w - HUD_W - 20;
+  let top = asteroidScreenPos?.y ? asteroidScreenPos.y - 90 : 80;
+  
+  // Is the default right-placement going out of bounds?
+  let isLeftSide = false;
+  let isBottomSide = false;
 
-  const positionStyle = asteroidScreenPos
-    ? { position: "fixed" as const, left: `${asteroidScreenPos.x + OFFSET_X}px`, top: `${asteroidScreenPos.y + OFFSET_Y}px`, maxWidth: "240px" }
-    : { position: "fixed" as const, top: "5rem", right: "1.5rem" };
+  if (asteroidScreenPos) {
+    // Safe bounds define the viewable globe area
+    const minX = bounds.isMobile ? 10 : 440; // 420px is the desktop left panel
+    const maxX = bounds.isMobile ? bounds.w - HUD_W - 10 : bounds.w - HUD_W - 20;
+    const minY = 80; // Top header
+    const maxY = bounds.isMobile ? (bounds.h * 0.5) - HUD_H - 10 : bounds.h - HUD_H - 20;
+
+    // Flip horizontally if going off-screen right
+    if (left > maxX) {
+      left = asteroidScreenPos.x - HUD_W - 20;
+      isLeftSide = true;
+    }
+    
+    // Flip vertically if going off-screen top
+    if (top < minY) {
+      top = asteroidScreenPos.y + 20;
+      isBottomSide = true;
+    }
+
+    // Clamp absolute constraints in case the asteroid itself is hidden
+    left = Math.max(minX, Math.min(maxX, left));
+    top = Math.max(minY, Math.min(maxY, top));
+  }
+
+  const positionStyle = { 
+    position: "fixed" as const, 
+    left: `${left}px`, 
+    top: `${top}px`, 
+    width: `${HUD_W}px` 
+  };
 
   return (
     <AnimatePresence>
@@ -136,12 +179,23 @@ export function FlightTelemetryHUD({ selectedAsteroid, progress, impactPoint, as
         {/* Connector line */}
         {asteroidScreenPos && (
           <svg
-            style={{ position: "fixed", left: asteroidScreenPos.x - 2, top: asteroidScreenPos.y + OFFSET_Y + 60, pointerEvents: "none", overflow: "visible" }}
-            width={OFFSET_X + 4}
-            height={Math.abs(OFFSET_Y) - 60}
+            style={{ 
+              position: "fixed", 
+              left: isLeftSide ? asteroidScreenPos.x - Math.abs(asteroidScreenPos.x - left - HUD_W) : asteroidScreenPos.x - 2, 
+              top: isBottomSide ? asteroidScreenPos.y - 2 : asteroidScreenPos.y - Math.abs(asteroidScreenPos.y - top), 
+              pointerEvents: "none", 
+              overflow: "visible" 
+            }}
+            width={Math.abs(asteroidScreenPos.x - (isLeftSide ? left + HUD_W : left)) + 4}
+            height={Math.abs(asteroidScreenPos.y - (isBottomSide ? top : top + HUD_H)) + 4}
           >
-            <line x1={0} y1={Math.abs(OFFSET_Y) - 60} x2={0} y2={0}
-              stroke="#06b6d4" strokeWidth={1} strokeOpacity={0.5} strokeDasharray="3,3" />
+            <line 
+              x1={isLeftSide ? Math.abs(asteroidScreenPos.x - left - HUD_W) : 0} 
+              y1={isBottomSide ? 0 : Math.abs(asteroidScreenPos.y - top - HUD_H)} 
+              x2={isLeftSide ? 0 : Math.abs(asteroidScreenPos.x - left)} 
+              y2={isBottomSide ? Math.abs(asteroidScreenPos.y - top) : Math.abs(asteroidScreenPos.y - top) + (isBottomSide ? -20 : -30)}
+              stroke="#06b6d4" strokeWidth={1} strokeOpacity={0.5} strokeDasharray="3,3" 
+            />
           </svg>
         )}
       </motion.div>

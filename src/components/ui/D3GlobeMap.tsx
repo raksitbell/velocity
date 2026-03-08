@@ -66,9 +66,16 @@ export function D3GlobeMap({
   const impactPointRef = useRef(impactPoint);
   const selectedAsteroidRef = useRef(selectedAsteroid);
   const onAsteroidScreenPosRef = useRef(onAsteroidScreenPos);
+  
+  // Auto-center tracking
+  const autoCenterRef = useRef(true);
+  
   useEffect(() => { progressRef.current = progress; }, [progress]);
   useEffect(() => { mapProgressRef.current = mapProgress; }, [mapProgress]);
-  useEffect(() => { impactPointRef.current = impactPoint; }, [impactPoint]);
+  useEffect(() => { 
+    impactPointRef.current = impactPoint; 
+    autoCenterRef.current = true; // Auto-center whenever target changes
+  }, [impactPoint]);
   useEffect(() => { selectedAsteroidRef.current = selectedAsteroid; }, [selectedAsteroid]);
   useEffect(() => { onAsteroidScreenPosRef.current = onAsteroidScreenPos; }, [onAsteroidScreenPos]);
 
@@ -119,17 +126,25 @@ export function D3GlobeMap({
       const mp = mapProgressRef.current;
       const zoom = userZoomRef.current;
 
-      // 1. Interpolate rotation toward impact lat/lon during flight
+      // 1. Interpolate rotation toward impact lat/lon
       let rotChanged = false;
-      if (ip && p > 0 && p < 1) {
-        const tr: [number, number] = [-ip.lon, -ip.lat * 0.4];
+      
+      const isFlying = p > 0 && p < 1;
+      const shouldAutoCenter = ip && (isFlying || autoCenterRef.current);
+
+      if (shouldAutoCenter) {
+        const tr: [number, number] = [-ip!.lon, -ip!.lat * 0.4];
         const nr: [number, number] = [
-          rotRef.current[0] + (tr[0] - rotRef.current[0]) * 0.025,
-          rotRef.current[1] + (tr[1] - rotRef.current[1]) * 0.025,
+          rotRef.current[0] + (tr[0] - rotRef.current[0]) * 0.04,
+          rotRef.current[1] + (tr[1] - rotRef.current[1]) * 0.04,
         ];
-        if (Math.abs(nr[0] - rotRef.current[0]) > 0.01 || Math.abs(nr[1] - rotRef.current[1]) > 0.01) {
-          rotRef.current = nr;
-          rotChanged = true;
+        
+        // Only update if we are not manually dragging, or if flight forces it
+        if (!isDraggingRef.current || isFlying) {
+           if (Math.abs(nr[0] - rotRef.current[0]) > 0.01 || Math.abs(nr[1] - rotRef.current[1]) > 0.01) {
+             rotRef.current = nr;
+             rotChanged = true;
+           }
         }
       }
       if (rotChanged) setRotation([rotRef.current[0], rotRef.current[1]]);
@@ -188,6 +203,7 @@ export function D3GlobeMap({
   const handleMouseDown = (e: React.MouseEvent) => {
     if (progressRef.current > 0 && progressRef.current < 1) return;
     isDraggingRef.current = true;
+    autoCenterRef.current = false; // User took control
     lastMouseRef.current = [e.clientX, e.clientY];
   };
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -290,24 +306,26 @@ export function D3GlobeMap({
   }, [worldData, progress, rotation, dimensions, mapProgress, impactPoint, selectedAsteroid, userZoom]);
 
   return (
-    <div className={`absolute inset-0 bg-black flex items-center justify-center overflow-hidden transition-[padding] duration-300 ${
-      simComplete ? 'pb-[50vh] md:pb-0' : ''
-    }`}>
+    <div className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden">
       <svg
         ref={svgRef}
         width={dimensions.width}
         height={dimensions.height}
         style={{ transformOrigin: "center center", willChange: "transform" }}
-        className="w-full h-full cursor-grab active:cursor-grabbing"
+        className={`w-full h-full cursor-grab active:cursor-grabbing transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${
+          simComplete ? '-translate-y-[25vh] md:translate-y-0' : ''
+        }`}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
         onTouchStart={(e) => {
+          if (progressRef.current > 0 && progressRef.current < 1) return;
           const t = e.touches[0];
           lastMouseRef.current = [t.clientX, t.clientY];
           isDraggingRef.current = true;
+          autoCenterRef.current = false; // User took control
         }}
         onTouchMove={(e) => {
           if (!isDraggingRef.current) return;
