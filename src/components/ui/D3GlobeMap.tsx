@@ -34,7 +34,8 @@ interface D3GlobeMapProps {
   selectedAsteroid: Asteroid | null;
   progress: number;
   mapProgress: number; // 0 (Globe) to 100 (Map)
-  onMapProgressChange: (val: number) => void;
+  mapMode: "3d" | "2d";
+  onMapModeChange: (mode: "3d" | "2d") => void;
   impactPoint: { lat: number, lon: number } | null;
 }
 
@@ -43,7 +44,8 @@ export function D3GlobeMap({
   selectedAsteroid,
   progress,
   mapProgress,
-  onMapProgressChange,
+  mapMode,
+  onMapModeChange,
   impactPoint
 }: D3GlobeMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -322,10 +324,10 @@ export function D3GlobeMap({
       {/* 2D/3D Mode Toggle (Only visible after impact or when just inspecting) */}
       <div className="absolute bottom-24 right-4 md:bottom-6 md:right-[480px] z-20">
          <button
-           onClick={() => onMapProgressChange(mapProgress === 0 ? 100 : 0)}
+           onClick={() => onMapModeChange(mapMode === "3d" ? "2d" : "3d")}
            className="bg-zinc-900/80 backdrop-blur border border-zinc-700 text-xs text-white px-4 py-2 rounded-full hover:bg-zinc-800 transition-colors shadow-lg"
          >
-           {mapProgress === 0 ? "Unroll to 2D Map" : "Roll to 3D Globe"}
+           {mapMode === "3d" ? "Unroll to 2D Map" : "Roll to 3D Globe"}
          </button>
       </div>
     </div>

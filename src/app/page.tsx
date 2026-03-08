@@ -26,7 +26,8 @@ export default function Home() {
     isLoading,
     error,
     mapProgress,
-    setMapProgress,
+    mapMode,
+    setMapMode,
     handleReset
   } = useSimulation();
 
@@ -66,7 +67,8 @@ export default function Home() {
           selectedAsteroid={selectedAsteroid}
           progress={progress}
           mapProgress={mapProgress}
-          onMapProgressChange={setMapProgress}
+          mapMode={mapMode}
+          onMapModeChange={setMapMode}
           impactPoint={impactPoint}
         />
       )}

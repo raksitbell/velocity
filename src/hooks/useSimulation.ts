@@ -17,7 +17,33 @@ export function useSimulation() {
   const [error, setError] = useState<string | null>(null);
 
   // Toggle between 3D Globe and 2D Map (used by new D3 globe)
+  const [mapMode, setMapMode] = useState<"3d" | "2d">("3d");
   const [mapProgress, setMapProgress] = useState(0); 
+
+  // Map Rotation Animation Loop
+  useEffect(() => {
+    let animationFrameId: number;
+    let lastTime: number | null = null;
+    
+    const animateMap = (time: number) => {
+      if (lastTime !== null) {
+        const delta = time - lastTime;
+        setMapProgress(prev => {
+           const target = mapMode === "2d" ? 100 : 0;
+           if (prev === target) return prev;
+           
+           const step = delta * 0.2; // Speed of unroll
+           if (mapMode === "2d") return Math.min(100, prev + step);
+           else return Math.max(0, prev - step);
+        });
+      }
+      lastTime = time;
+      animationFrameId = requestAnimationFrame(animateMap);
+    };
+    
+    animationFrameId = requestAnimationFrame(animateMap);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [mapMode]);
 
   // Simulation Animation Loop
   const requestRef = useRef<number>(null);
@@ -30,16 +56,12 @@ export function useSimulation() {
         // Reduced speed slightly since SVG projection calculation takes more CPU
         const next = prev + delta * 0.00008; 
         if (next >= 1) { 
-          setIsPlaying(false); 
+          setIsPlaying(false);
+          // Auto-unroll map at impact
+          setMapMode("2d"); 
           return 1; 
         }
         return next;
-      });
-
-      // Also unroll the map to 2D automatically upon impact
-      setMapProgress(prev => {
-         const t = prev + delta * 0.05;
-         return t >= 100 ? 100 : t;
       });
     }
     previousTimeRef.current = time;
@@ -62,7 +84,7 @@ export function useSimulation() {
   useEffect(() => {
     setProgress(0);
     setIsPlaying(false);
-    setMapProgress(0); // Roll back to globe
+    setMapMode("3d"); // Roll back to globe
     
     if (selectedAsteroid) {
        // Auto-calculate impact point
@@ -125,7 +147,8 @@ export function useSimulation() {
     isLoading,
     error,
     mapProgress,
-    setMapProgress,
+    mapMode,
+    setMapMode,
     handleReset
   };
 }
