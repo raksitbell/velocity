@@ -1,20 +1,14 @@
 "use client";
 
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import * as d3 from "d3";
 import { feature } from "topojson-client";
 import { Asteroid } from "@/services/nasaService";
-import { ImpactMetrics } from "@/lib/impactCalculator";
+import { ZoomIn, ZoomOut } from "lucide-react";
 
-// D3/TopoJSON Types
-interface GeoFeature {
-  type: string;
-  geometry: any;
-  properties: any;
-}
+interface GeoFeature { type: string; geometry: any; properties: any; }
 
-// Map projection interpolator from globe-to-map-transform.tsx
 function interpolateProjection(raw0: any, raw1: any) {
   const mutate: any = d3.geoProjectionMutator((t: number) => (x: number, y: number) => {
     const [x0, y0] = raw0(x, y);
@@ -23,9 +17,7 @@ function interpolateProjection(raw0: any, raw1: any) {
   });
   let t = 0;
   return Object.assign((mutate as any)(t), {
-    alpha(_: number) {
-      return arguments.length ? (mutate as any)((t = +_)) : t;
-    },
+    alpha(_: number) { return arguments.length ? (mutate as any)((t = +_)) : t; },
   });
 }
 
@@ -33,273 +25,266 @@ interface D3GlobeMapProps {
   asteroids: Asteroid[];
   selectedAsteroid: Asteroid | null;
   progress: number;
-  mapProgress: number; // 0 (Globe) to 100 (Map)
+  mapProgress: number;
   mapMode: "3d" | "2d";
   onMapModeChange: (mode: "3d" | "2d") => void;
-  impactPoint: { lat: number, lon: number } | null;
+  impactPoint: { lat: number; lon: number } | null;
+  onAsteroidScreenPos?: (x: number, y: number) => void;
 }
 
+const MIN_ZOOM = 0.4;
+const MAX_ZOOM = 4.0;
+
 export function D3GlobeMap({
-  asteroids,
-  selectedAsteroid,
-  progress,
-  mapProgress,
-  mapMode,
-  onMapModeChange,
-  impactPoint
+  selectedAsteroid, progress, mapProgress, mapMode, onMapModeChange, impactPoint, onAsteroidScreenPos,
 }: D3GlobeMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [worldData, setWorldData] = useState<GeoFeature[]>([]);
-  const [rotation, setRotation] = useState([0, 0]);
-  const [translation] = useState([0, 0]);
-  const [isDragging, setIsDragging] = useState(false);
-  const [lastMouse, setLastMouse] = useState([0, 0]);
 
-  // Window size for exact canvas fitting (D3 needs explicit px values)
+  // Rotation: state drives D3 render, ref is updated by rAF loop
+  const [rotation, setRotation] = useState<[number, number]>([0, 0]);
+  const rotRef = useRef<[number, number]>([0, 0]);
+
+  // Drag state
+  const isDraggingRef = useRef(false);
+  const lastMouseRef = useRef([0, 0]);
+
+  // User zoom
+  const [userZoom, setUserZoom] = useState(1.0);
+  const userZoomRef = useRef(1.0);
+  useEffect(() => { userZoomRef.current = userZoom; }, [userZoom]);
+
+  // Window dimensions
   const [dimensions, setDimensions] = useState({ width: 800, height: 800 });
+  const dimensionsRef = useRef(dimensions);
+  useEffect(() => { dimensionsRef.current = dimensions; }, [dimensions]);
+
+  // Props as refs — so the single rAF loop can read them without re-creating
+  const progressRef = useRef(progress);
+  const mapProgressRef = useRef(mapProgress);
+  const impactPointRef = useRef(impactPoint);
+  const selectedAsteroidRef = useRef(selectedAsteroid);
+  const onAsteroidScreenPosRef = useRef(onAsteroidScreenPos);
+  useEffect(() => { progressRef.current = progress; }, [progress]);
+  useEffect(() => { mapProgressRef.current = mapProgress; }, [mapProgress]);
+  useEffect(() => { impactPointRef.current = impactPoint; }, [impactPoint]);
+  useEffect(() => { selectedAsteroidRef.current = selectedAsteroid; }, [selectedAsteroid]);
+  useEffect(() => { onAsteroidScreenPosRef.current = onAsteroidScreenPos; }, [onAsteroidScreenPos]);
 
   useEffect(() => {
-    const handleResize = () => {
-      if (typeof window !== 'undefined') {
-         setDimensions({ width: window.innerWidth, height: window.innerHeight });
-      }
-    };
-    handleResize(); 
+    const handleResize = () => setDimensions({ width: window.innerWidth, height: window.innerHeight });
+    handleResize();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // 1. Fetch world topology data
   useEffect(() => {
-    const loadWorldData = async () => {
-      try {
-        const response = await fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json");
-        const world: any = await response.json();
+    fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
+      .then(r => r.json())
+      .then((world: any) => {
         const countries = (feature(world, world.objects.countries as any) as any).features;
         setWorldData(countries as GeoFeature[]);
-      } catch (error) {
-        console.error("Error loading world data:", error);
-      }
-    };
-    loadWorldData();
+      }).catch(console.error);
   }, []);
 
-  // 2. Drag to Rotate Logic
-  const handleMouseDown = (event: React.MouseEvent) => {
-    setIsDragging(true);
-    setLastMouse([event.clientX, event.clientY]);
-  };
+  // ──────────────────────────────────────────────────────────────
+  // Single rAF loop — handles camera AND rotation interpolation.
+  // Camera is applied via direct DOM mutation (no React setState).
+  // setRotation is called only when rotation meaningfully changes.
+  // ──────────────────────────────────────────────────────────────
+  const camScaleAnim = useRef(1);
+  const camTxAnim = useRef(0);
+  const camTyAnim = useRef(0);
 
-  const handleMouseMove = (event: React.MouseEvent) => {
-    if (!isDragging) return;
-    const currentMouse = [event.clientX, event.clientY];
-    const dx = currentMouse[0] - lastMouse[0];
-    const dy = currentMouse[1] - lastMouse[1];
-
-    const t = mapProgress / 100;
-
-    if (t < 0.5) {
-      // Globe mode: 3D rotation sensitivity
-      const sensitivity = 0.5;
-      setRotation((prev) => [
-        prev[0] + dx * sensitivity,
-        Math.max(-90, Math.min(90, prev[1] - dy * sensitivity))
-      ]);
-    } else {
-      // Map mode: Equirectangular 2D pan
-      const sensitivityMap = 0.25;
-      setRotation((prev) => [
-        prev[0] + dx * sensitivityMap,
-        Math.max(-90, Math.min(90, prev[1] - dy * sensitivityMap))
-      ]);
-    }
-    setLastMouse(currentMouse);
-  };
-
-  const handleMouseUp = () => setIsDragging(false);
-
-  // Auto-rotate during simulation
   useEffect(() => {
-    if (progress > 0 && progress < 1 && mapProgress < 50) {
-       // Spin slightly during flight
-       setRotation(r => [r[0] + 0.1, r[1]]);
-    }
-  }, [progress, mapProgress]);
+    let rafId: number;
 
-  // Manual targeting removed directly map based on impactPoint hook
+    const buildProjection = (w: number, h: number, rot: [number, number], mp: number, zoom: number) => {
+      const t = mp / 100;
+      const alpha = Math.pow(t, 0.5);
+      const baseScale = d3.scaleLinear().domain([0, 1]).range([Math.min(w, h) / 2.2, w / 6.5])(alpha) * zoom;
+      const proj = interpolateProjection(d3.geoOrthographicRaw, d3.geoEquirectangularRaw)
+        .scale(baseScale).translate([w / 2, h / 2]).rotate([rot[0], rot[1]]).precision(0.1);
+      proj.alpha(alpha);
+      return proj;
+    };
 
+    const tick = () => {
+      const p = progressRef.current;
+      const ip = impactPointRef.current;
+      const { width: w, height: h } = dimensionsRef.current;
+      const mp = mapProgressRef.current;
+      const zoom = userZoomRef.current;
 
-  // 3. Render map via D3
+      // 1. Interpolate rotation toward impact lat/lon during flight
+      let rotChanged = false;
+      if (ip && p > 0 && p < 1) {
+        const tr: [number, number] = [-ip.lon, -ip.lat * 0.4];
+        const nr: [number, number] = [
+          rotRef.current[0] + (tr[0] - rotRef.current[0]) * 0.025,
+          rotRef.current[1] + (tr[1] - rotRef.current[1]) * 0.025,
+        ];
+        if (Math.abs(nr[0] - rotRef.current[0]) > 0.01 || Math.abs(nr[1] - rotRef.current[1]) > 0.01) {
+          rotRef.current = nr;
+          rotChanged = true;
+        }
+      }
+      if (rotChanged) setRotation([rotRef.current[0], rotRef.current[1]]);
+
+      // 2. Compute camera targets
+      let targetScale = 1, targetTx = 0, targetTy = 0;
+      if (ip && p > 0 && p < 1) {
+        if (p < 0.08) targetScale = 1 - p * (0.38 / 0.08);
+        else if (p < 0.85) targetScale = 0.62;
+        else targetScale = 0.62 + ((p - 0.85) / 0.15) * 0.38;
+
+        const proj = buildProjection(w, h, rotRef.current, mp, zoom);
+        const ic = proj([ip.lon, ip.lat]);
+        const ix = ic ? ic[0] : w / 2;
+        const iy = ic ? ic[1] : h / 2;
+        const astX = w * 0.85 + (ix - w * 0.85) * p;
+        const astY = -h * 0.08 + (iy - (-h * 0.08)) * p;
+
+        const followStr = 0.3;
+        targetTx = (w / 2 - astX) * followStr;
+        targetTy = (h / 2 - astY) * followStr;
+
+        // Emit true screen position accounting for camera transform
+        const cs = camScaleAnim.current;
+        const screenX = w / 2 + (astX + camTxAnim.current - w / 2) * cs;
+        const screenY = h / 2 + (astY + camTyAnim.current - h / 2) * cs;
+        onAsteroidScreenPosRef.current?.(screenX, screenY);
+      }
+
+      // 3. Lerp camera values
+      camScaleAnim.current += (targetScale - camScaleAnim.current) * 0.08;
+      camTxAnim.current += (targetTx - camTxAnim.current) * 0.06;
+      camTyAnim.current += (targetTy - camTyAnim.current) * 0.06;
+
+      // 4. Apply camera directly to DOM (zero React setState for camera)
+      if (svgRef.current) {
+        svgRef.current.style.transform =
+          `scale(${camScaleAnim.current}) translate(${camTxAnim.current}px, ${camTyAnim.current}px)`;
+      }
+
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, []); // Intentionally empty — reads everything from refs
+
+  // Scroll wheel zoom
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 1.1 : 0.9;
+    setUserZoom(z => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * delta)));
+  }, []);
+
+  // Drag to rotate (disabled during flight)
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (progressRef.current > 0 && progressRef.current < 1) return;
+    isDraggingRef.current = true;
+    lastMouseRef.current = [e.clientX, e.clientY];
+  };
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDraggingRef.current) return;
+    const dx = e.clientX - lastMouseRef.current[0];
+    const dy = e.clientY - lastMouseRef.current[1];
+    const t = mapProgressRef.current / 100;
+    const sens = t < 0.5 ? 0.5 : 0.25;
+    rotRef.current = [
+      rotRef.current[0] + dx * sens,
+      Math.max(-90, Math.min(90, rotRef.current[1] - dy * sens)),
+    ];
+    setRotation([rotRef.current[0], rotRef.current[1]]);
+    lastMouseRef.current = [e.clientX, e.clientY];
+  };
+  const handleMouseUp = () => { isDraggingRef.current = false; };
+
+  // D3 render — runs when rotation, zoom, progress etc. change (for visual update)
   useEffect(() => {
     if (!svgRef.current || worldData.length === 0) return;
-
     const { width, height } = dimensions;
     const svg = d3.select(svgRef.current);
-    
-    // Clear everything except base defs
     svg.selectAll(".map-layer").remove();
 
     const t = mapProgress / 100;
     const alpha = Math.pow(t, 0.5);
-
-    // Scale dynamically based on window size to fill screen
-    const minDim = Math.min(width, height);
-    const scale = d3.scaleLinear().domain([0, 1]).range([minDim / 2.2, width / 6.5]); 
-    const baseRotate = d3.scaleLinear().domain([0, 1]).range([0, 0]);
+    const baseScale = d3.scaleLinear().domain([0, 1]).range([Math.min(width, height) / 2.2, width / 6.5])(alpha) * userZoom;
 
     const projection = interpolateProjection(d3.geoOrthographicRaw, d3.geoEquirectangularRaw)
-      .scale(scale(alpha))
-      .translate([width / 2 + translation[0], height / 2 + translation[1]])
-      .rotate([baseRotate(alpha) + rotation[0], rotation[1]])
-      .precision(0.1);
-
+      .scale(baseScale).translate([width / 2, height / 2])
+      .rotate([rotation[0], rotation[1]]).precision(0.1);
     projection.alpha(alpha);
     const path = d3.geoPath(projection);
-
     const mapLayer = svg.append("g").attr("class", "map-layer");
 
-    // A. Ocean/Space Sphere
+    // Sphere
     try {
-      const sphereOutline = path({ type: "Sphere" });
-      if (sphereOutline) {
-        mapLayer
-          .append("path")
-          .datum({ type: "Sphere" })
-          .attr("d", sphereOutline)
-          .attr("fill", "#020513") // Deep ocean color instead of transparent
-          .attr("stroke", "#1e293b")
-          .attr("stroke-width", 1);
-      }
+      const s = path({ type: "Sphere" });
+      if (s) mapLayer.append("path").datum({ type: "Sphere" }).attr("d", s)
+        .attr("fill", "#020513").attr("stroke", "#1e293b").attr("stroke-width", 1);
     } catch {}
 
-    // B. Graticule
+    // Graticule
     try {
       const graticule = d3.geoGraticule();
-      mapLayer
-        .append("path")
-        .datum(graticule())
-        .attr("d", path(graticule()))
-        .attr("fill", "none")
-        .attr("stroke", "#334155")
-        .attr("stroke-width", 0.5)
-        .attr("opacity", 0.3);
+      mapLayer.append("path").datum(graticule()).attr("d", path(graticule()))
+        .attr("fill", "none").attr("stroke", "#334155").attr("stroke-width", 0.5).attr("opacity", 0.3);
     } catch {}
 
-    // C. Countries
-    mapLayer
-      .selectAll(".country")
-      .data(worldData)
-      .enter()
-      .append("path")
+    // Countries
+    mapLayer.selectAll(".country").data(worldData).enter().append("path")
       .attr("class", "country")
-      .attr("d", (d) => {
-        try {
-          const pathString = path(d as any);
-          if (typeof pathString === "string" && (pathString.includes("NaN") || pathString.includes("Infinity"))) return "";
-          return pathString || "";
-        } catch { return ""; }
-      })
-      .attr("fill", "#0f172a") // Landmass color
-      .attr("stroke", "#334155")
-      .attr("stroke-width", 1)
-      .style("visibility", function () {
-        const pd = d3.select(this).attr("d");
-        return pd && pd.length > 0 && !pd.includes("NaN") ? "visible" : "hidden";
-      });
+      .attr("d", (d) => { try { const ps = path(d as any); return typeof ps === "string" && (ps.includes("NaN") || ps.includes("Infinity")) ? "" : ps || ""; } catch { return ""; } })
+      .attr("fill", "#0f172a").attr("stroke", "#334155").attr("stroke-width", 1)
+      .style("visibility", function () { const pd = d3.select(this).attr("d"); return pd && pd.length > 0 && !pd.includes("NaN") ? "visible" : "hidden"; });
 
-    // D. Target Marker (Crosshair)
-    if (impactPoint) {
-       const impactCoords = projection([impactPoint.lon, impactPoint.lat]);
-       // Check if coordinates exist and are on the visible side of the globe
-       if (impactCoords) {
-           const [ix, iy] = impactCoords;
-           const pathData = path({type: 'Point', coordinates: [impactPoint.lon, impactPoint.lat]});
-           
-           if (pathData) {
-              const targetG = mapLayer.append("g")
-                 .attr("transform", `translate(${ix},${iy})`)
-                 .attr("class", progress >= 1 ? "hidden" : "");
-
-              // Crosshair
-              targetG.append("circle")
-                .attr("r", 8)
-                .attr("fill", "none")
-                .attr("stroke", "#06b6d4")
-                .attr("stroke-width", 2)
-                .attr("class", "animate-pulse");
-
-              targetG.append("line").attr("x1", -12).attr("y1", 0).attr("x2", 12).attr("y2", 0).attr("stroke", "#06b6d4").attr("stroke-width", 1);
-              targetG.append("line").attr("x1", 0).attr("y1", -12).attr("x2", 0).attr("y2", 12).attr("stroke", "#06b6d4").attr("stroke-width", 1);
-           }
-       }
-    }
-
-    // E. Impact / Blast Rings (Only during/after impact)
-    // Needs calculateImpactMetrics which is now separated from this component, but we can do a dummy scaled ring
-    if (progress >= 1 && impactPoint) {
-      const impactCoords = projection([impactPoint.lon, impactPoint.lat]);
-      if (impactCoords && path({type: 'Point', coordinates: [impactPoint.lon, impactPoint.lat]})) {
-         const [ix, iy] = impactCoords;
-         const epicenter = mapLayer.append("g").attr("transform", `translate(${ix},${iy})`);
-
-         // Ground Zero
-         epicenter.append("circle")
-           .attr("r", 3)
-           .attr("fill", "#ef4444");
-
-         // Fireball Ring (Simplified overlay since metrics are abstracted)
-         epicenter.append("circle")
-           .attr("r", 15) // Arbitrary scale for visibility
-           .attr("fill", "rgba(239, 68, 68, 0.4)")
-           .attr("stroke", "#ef4444")
-           .attr("stroke-width", 2);
-
-         // Shockwave Ring
-         epicenter.append("circle")
-           .attr("r", 45)
-           .attr("fill", "rgba(234, 179, 8, 0.1)")
-           .attr("stroke", "#eab308")
-           .attr("stroke-dasharray", "4,4")
-           .attr("stroke-width", 1);
+    // Crosshair
+    if (impactPoint && progress < 1) {
+      const coords = projection([impactPoint.lon, impactPoint.lat]);
+      if (coords && path({ type: "Point", coordinates: [impactPoint.lon, impactPoint.lat] })) {
+        const [ix, iy] = coords;
+        const tg = mapLayer.append("g").attr("transform", `translate(${ix},${iy})`);
+        tg.append("circle").attr("r", 8).attr("fill", "none").attr("stroke", "#06b6d4").attr("stroke-width", 2);
+        tg.append("line").attr("x1", -12).attr("y1", 0).attr("x2", 12).attr("y2", 0).attr("stroke", "#06b6d4").attr("stroke-width", 1);
+        tg.append("line").attr("x1", 0).attr("y1", -12).attr("x2", 0).attr("y2", 12).attr("stroke", "#06b6d4").attr("stroke-width", 1);
       }
     }
 
-    // F. Asteroid Approach Representation
-    if (selectedAsteroid && progress > 0 && progress < 1 && impactPoint) {
-        const impactProj = projection([impactPoint.lon, impactPoint.lat]);
-        if (impactProj) {
-           const [ix, iy] = impactProj;
-           
-           // Trajectory line from top-right down to target
-           const startX = width;
-           const startY = 0;
-           
-           const currentX = startX + (ix - startX) * progress;
-           const currentY = startY + (iy - startY) * progress;
-
-           // Trail
-           mapLayer.append("line")
-             .attr("x1", startX)
-             .attr("y1", startY)
-             .attr("x2", currentX)
-             .attr("y2", currentY)
-             .attr("stroke", "url(#asteroidTrail)")
-             .attr("stroke-width", 3);
-
-           // Asteroid Object
-           const isHazardous = selectedAsteroid.is_potentially_hazardous_asteroid;
-           mapLayer.append("circle")
-             .attr("cx", currentX)
-             .attr("cy", currentY)
-             .attr("r", isHazardous ? 6 : 4)
-             .attr("fill", isHazardous ? "#f97316" : "#22d3ee")
-             .attr("stroke", "#ffffff")
-             .attr("stroke-width", 1)
-             .attr("filter", "drop-shadow(0px 0px 8px rgba(255,255,255,0.8))");
-        }
+    // Impact rings
+    if (progress >= 1 && impactPoint) {
+      const coords = projection([impactPoint.lon, impactPoint.lat]);
+      if (coords && path({ type: "Point", coordinates: [impactPoint.lon, impactPoint.lat] })) {
+        const [ix, iy] = coords;
+        const ep = mapLayer.append("g").attr("transform", `translate(${ix},${iy})`);
+        ep.append("circle").attr("r", 3).attr("fill", "#ef4444");
+        ep.append("circle").attr("r", 15).attr("fill", "rgba(239,68,68,0.4)").attr("stroke", "#ef4444").attr("stroke-width", 2);
+        ep.append("circle").attr("r", 45).attr("fill", "rgba(234,179,8,0.1)").attr("stroke", "#eab308").attr("stroke-dasharray", "4,4").attr("stroke-width", 1);
+      }
     }
 
-  }, [worldData, progress, rotation, translation, dimensions, mapProgress, impactPoint, selectedAsteroid]);
+    // Asteroid approach
+    if (selectedAsteroid && progress > 0 && progress < 1 && impactPoint) {
+      const impactProj = projection([impactPoint.lon, impactPoint.lat]);
+      if (impactProj) {
+        const [ix, iy] = impactProj;
+        const startX = width * 0.85, startY = -height * 0.08;
+        const astX = startX + (ix - startX) * progress;
+        const astY = startY + (iy - startY) * progress;
+        mapLayer.append("line").attr("x1", startX).attr("y1", startY).attr("x2", astX).attr("y2", astY)
+          .attr("stroke", "url(#asteroidTrail)").attr("stroke-width", 3);
+        const isHaz = selectedAsteroid.is_potentially_hazardous_asteroid;
+        const col = isHaz ? "#f97316" : "#22d3ee";
+        mapLayer.append("circle").attr("cx", astX).attr("cy", astY).attr("r", isHaz ? 18 : 14)
+          .attr("fill", "none").attr("stroke", col).attr("stroke-width", 1).attr("opacity", 0.35);
+        mapLayer.append("circle").attr("cx", astX).attr("cy", astY).attr("r", isHaz ? 7 : 5)
+          .attr("fill", col).attr("stroke", "#ffffff").attr("stroke-width", 1.5)
+          .attr("filter", `drop-shadow(0 0 8px ${col})`);
+      }
+    }
+  }, [worldData, progress, rotation, dimensions, mapProgress, impactPoint, selectedAsteroid, userZoom]);
 
   return (
     <div className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden">
@@ -307,28 +292,41 @@ export function D3GlobeMap({
         ref={svgRef}
         width={dimensions.width}
         height={dimensions.height}
-        className={`w-full h-full cursor-grab active:cursor-grabbing ${progress >= 1 ? 'pointer-events-none' : ''}`}
+        style={{ transformOrigin: "center center", willChange: "transform" }}
+        className="w-full h-full cursor-grab active:cursor-grabbing"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
       >
-         <defs>
-           <linearGradient id="asteroidTrail" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="transparent" />
-              <stop offset="100%" stopColor="#f97316" stopOpacity="0.8" />
-           </linearGradient>
-         </defs>
+        <defs>
+          <linearGradient id="asteroidTrail" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="transparent" />
+            <stop offset="100%" stopColor="#f97316" stopOpacity="0.8" />
+          </linearGradient>
+        </defs>
       </svg>
-      
-      {/* 2D/3D Mode Toggle (Only visible after impact or when just inspecting) */}
-      <div className="absolute bottom-24 right-4 md:bottom-6 md:right-[480px] z-20">
-         <button
-           onClick={() => onMapModeChange(mapMode === "3d" ? "2d" : "3d")}
-           className="bg-zinc-900/80 backdrop-blur border border-zinc-700 text-xs text-white px-4 py-2 rounded-full hover:bg-zinc-800 transition-colors shadow-lg"
-         >
-           {mapMode === "3d" ? "Unroll to 2D Map" : "Roll to 3D Globe"}
-         </button>
+
+      {/* Zoom Controls */}
+      <div className="absolute bottom-32 right-4 md:bottom-16 md:right-[490px] z-20 flex flex-col gap-1.5">
+        <button onClick={() => setUserZoom(z => Math.min(MAX_ZOOM, z * 1.25))}
+          className="w-9 h-9 bg-zinc-900/80 backdrop-blur border border-zinc-700 text-white rounded-lg hover:bg-zinc-800 flex items-center justify-center transition-colors shadow-lg" title="Zoom In">
+          <ZoomIn className="w-4 h-4" />
+        </button>
+        <button onClick={() => setUserZoom(z => Math.max(MIN_ZOOM, z * 0.8))}
+          className="w-9 h-9 bg-zinc-900/80 backdrop-blur border border-zinc-700 text-white rounded-lg hover:bg-zinc-800 flex items-center justify-center transition-colors shadow-lg" title="Zoom Out">
+          <ZoomOut className="w-4 h-4" />
+        </button>
+        <div className="text-[9px] text-center font-mono text-zinc-500">{(userZoom * 100).toFixed(0)}%</div>
+      </div>
+
+      {/* 2D/3D Toggle */}
+      <div className="absolute bottom-24 right-4 md:bottom-6 md:right-[490px] z-20">
+        <button onClick={() => onMapModeChange(mapMode === "3d" ? "2d" : "3d")}
+          className="bg-zinc-900/80 backdrop-blur border border-zinc-700 text-xs text-white px-4 py-2 rounded-full hover:bg-zinc-800 transition-colors shadow-lg">
+          {mapMode === "3d" ? "Unroll to 2D Map" : "Roll to 3D Globe"}
+        </button>
       </div>
     </div>
   );

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Asteroid } from "@/services/nasaService";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertTriangle, ShieldCheck, Menu, X, Target, ChevronRight } from "lucide-react";
+import { AlertTriangle, ShieldCheck, Menu, X, Target, Settings } from "lucide-react";
 
 interface AsteroidPanelProps {
   asteroids: Asteroid[];
@@ -11,6 +11,9 @@ interface AsteroidPanelProps {
   onSelectAsteroid: (val: Asteroid | null) => void;
   isLoading: boolean;
   onStartSimulation?: () => void;
+  onOpenSettings?: () => void;
+  simRunning?: boolean;
+  simComplete?: boolean;
 }
 
 export function AsteroidPanel({
@@ -19,6 +22,9 @@ export function AsteroidPanel({
   onSelectAsteroid,
   isLoading,
   onStartSimulation,
+  onOpenSettings,
+  simRunning,
+  simComplete,
 }: AsteroidPanelProps) {
   // Start closed on mobile so the globe is visible by default.
   // Open automatically on desktop (≥ 768 px) after hydration.
@@ -63,20 +69,45 @@ export function AsteroidPanel({
             className="fixed top-0 left-0 h-full w-[85vw] sm:w-80 md:w-96 bg-black/40 backdrop-blur-2xl border-r border-white/10 z-30 flex flex-col shadow-2xl"
           >
             {/* Header */}
-            <div className="p-6 border-b border-white/10 flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-white bg-clip-text text-transparent flex items-center gap-2">
-                  <Target className="w-6 h-6 text-cyan-400" />
-                  Velocity
-                </h1>
-                <p className="text-zinc-400 text-sm mt-1">Asteroid Impact Simulator</p>
+            <div className="p-5 border-b border-white/10 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <Target className="w-5 h-5 text-cyan-400 shrink-0" />
+                <div className="min-w-0">
+                  <h1 className="text-lg font-bold bg-gradient-to-r from-cyan-400 to-white bg-clip-text text-transparent leading-none">
+                    Velocity
+                  </h1>
+                  {simRunning && (
+                    <span className="text-[9px] font-mono text-cyan-400 animate-pulse uppercase tracking-widest">
+                      Simulation Running
+                    </span>
+                  )}
+                  {simComplete && !simRunning && (
+                    <span className="text-[9px] font-mono text-red-400 animate-pulse uppercase tracking-widest">
+                      Impact Confirmed
+                    </span>
+                  )}
+                  {!simRunning && !simComplete && (
+                    <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Asteroid Impact Simulator</span>
+                  )}
+                </div>
               </div>
-              <button
-                onClick={() => setIsOpen(false)}
-                className="md:hidden text-zinc-400 hover:text-white"
-              >
-                <X className="w-6 h-6" />
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                {onOpenSettings && (
+                  <button
+                    onClick={onOpenSettings}
+                    className="p-1.5 hover:bg-white/10 rounded-lg transition-colors group"
+                    title="Settings"
+                  >
+                    <Settings className="w-4 h-4 text-zinc-500 group-hover:text-cyan-400 transition-colors" />
+                  </button>
+                )}
+                <button
+                  onClick={() => setIsOpen(false)}
+                  className="md:hidden p-1.5 text-zinc-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Asteroid list */}
@@ -132,7 +163,7 @@ export function AsteroidPanel({
                       </h3>
                       {isSelected && (
                         <div className="flex items-center gap-1 text-cyan-400 text-xs font-medium animate-pulse">
-                          Target Locked <ChevronRight className="w-3 h-3" />
+                          Target Locked →
                         </div>
                       )}
                     </div>

@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Target, Settings } from "lucide-react";
+import { useMemo, useState, useCallback } from "react";
+import { Settings } from "lucide-react";
 import { calculateImpactMetrics } from "@/lib/impactCalculator";
 
 import { AsteroidPanel } from "@/components/ui/AsteroidPanel";
 import { ScientificQA } from "@/components/ui/ScientificQA";
+import { FlightTelemetryHUD } from "@/components/ui/FlightTelemetryHUD";
 import { SimulationControls } from "@/components/ui/SimulationControls";
 import { D3GlobeMap } from "@/components/ui/D3GlobeMap";
 import { MobileBottomBar } from "@/components/ui/MobileBottomBar";
@@ -32,6 +33,8 @@ export default function Home() {
   } = useSimulation();
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [astScreenPos, setAstScreenPos] = useState<{ x: number; y: number } | null>(null);
+  const onAsteroidScreenPos = useCallback((x: number, y: number) => setAstScreenPos({ x, y }), []);
 
   // Derived states
   const simRunning = (isPlaying || progress > 0) && progress < 1;
@@ -70,6 +73,7 @@ export default function Home() {
           mapMode={mapMode}
           onMapModeChange={setMapMode}
           impactPoint={impactPoint}
+          onAsteroidScreenPos={onAsteroidScreenPos}
         />
       )}
 
@@ -93,31 +97,6 @@ export default function Home() {
             />
           )}
 
-          {/* ── Top title bar ── */}
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-zinc-950/75 backdrop-blur-md border border-zinc-800 rounded-full pl-5 pr-2 py-2 shadow-[0_0_20px_rgba(0,180,255,0.1)] pointer-events-auto">
-            <Target className="w-3.5 h-3.5 text-cyan-400 pointer-events-none" />
-            <span className="text-[11px] font-mono font-semibold uppercase tracking-[0.25em] text-zinc-300 pointer-events-none">
-              Velocity / Asteroid Impact Simulator
-            </span>
-            {simRunning && (
-              <span className="text-[9px] font-mono text-cyan-400 animate-pulse uppercase tracking-widest border-l border-zinc-700 pl-3 pointer-events-none">
-                Simulation Running
-              </span>
-            )}
-            {simComplete && (
-              <span className="text-[9px] font-mono text-red-400 animate-pulse uppercase tracking-widest border-l border-zinc-700 pl-3 pointer-events-none">
-                Impact Confirmed
-              </span>
-            )}
-            <div className="w-px h-4 bg-zinc-800 ml-2" />
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-1.5 hover:bg-zinc-800 rounded-full transition-colors group"
-            >
-              <Settings className="w-4 h-4 text-zinc-500 group-hover:text-cyan-400 transition-colors" />
-            </button>
-          </div>
-
         {/* ── Left panel (asteroid selector) ── */}
         <div className="absolute inset-x-0 bottom-0 md:relative md:inset-auto pointer-events-none z-10 w-full md:w-auto h-full flex flex-col justify-end md:justify-start">
            {/* Desktop panel mapping */}
@@ -128,9 +107,20 @@ export default function Home() {
                 onSelectAsteroid={setSelectedAsteroid}
                 isLoading={isLoading}
                 onStartSimulation={() => setIsPlaying(true)}
+                onOpenSettings={() => setIsSettingsOpen(true)}
+                simRunning={simRunning}
+                simComplete={simComplete}
               />
            </div>
         </div>
+
+      {selectedAsteroid && (
+         <FlightTelemetryHUD
+           selectedAsteroid={selectedAsteroid}
+           progress={progress}
+           asteroidScreenPos={astScreenPos}
+         />
+      )}
 
       {/* Overlay controls - Sidebar and Bottom Bar */}
       <SimulationControls 

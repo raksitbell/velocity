@@ -7,132 +7,186 @@ import { useSettings } from "@/hooks/useSettings";
 export function useSimulation() {
   const [asteroids, setAsteroids] = useState<Asteroid[]>([]);
   const [selectedAsteroid, setSelectedAsteroid] = useState<Asteroid | null>(null);
-  
-  // Deterministic impact point based on the parsed selectedAsteroid
-  const [impactPoint, setImpactPoint] = useState<{ lat: number, lon: number } | null>(null);
-  
+  const [impactPoint, setImpactPoint] = useState<{ lat: number; lon: number } | null>(null);
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Toggle between 3D Globe and 2D Map (used by new D3 globe)
+  // Toggle between 3D Globe and 2D Map
   const [mapMode, setMapMode] = useState<"3d" | "2d">("3d");
-  const [mapProgress, setMapProgress] = useState(0); 
+  const [mapProgress, setMapProgress] = useState(0);
 
-  // Map Rotation Animation Loop
+  // ── Refs for synchronous tracking (avoid setState-inside-setState) ──
+  const progressRef = useRef(0);
+  const mapProgressRef = useRef(0);
+  const mapModeRef = useRef<"3d" | "2d">("3d");
+  const isPlayingRef = useRef(false);
+
+  // Keep mapModeRef in sync
   useEffect(() => {
-    let animationFrameId: number;
-    let lastTime: number | null = null;
-    
-    const animateMap = (time: number) => {
-      if (lastTime !== null) {
-        const delta = time - lastTime;
-        setMapProgress(prev => {
-           const target = mapMode === "2d" ? 100 : 0;
-           if (prev === target) return prev;
-           
-           const step = delta * 0.2; // Speed of unroll
-           if (mapMode === "2d") return Math.min(100, prev + step);
-           else return Math.max(0, prev - step);
-        });
-      }
-      lastTime = time;
-      animationFrameId = requestAnimationFrame(animateMap);
-    };
-    
-    animationFrameId = requestAnimationFrame(animateMap);
-    return () => cancelAnimationFrame(animationFrameId);
+    mapModeRef.current = mapMode;
   }, [mapMode]);
 
-  // Simulation Animation Loop
-  const requestRef = useRef<number>(null);
-  const previousTimeRef = useRef<number>(null);
+  // ── Map Roll/Unroll Animation (separate rAF, stops when done) ──
+  const mapAnimRef = useRef<number | null>(null);
+  const mapLastTimeRef = useRef<number | null>(null);
+
+  const stopMapAnim = useCallback(() => {
+    if (mapAnimRef.current !== null) {
+      cancelAnimationFrame(mapAnimRef.current);
+      mapAnimRef.current = null;
+    }
+    mapLastTimeRef.current = null;
+  }, []);
+
+  const startMapAnim = useCallback(() => {
+    stopMapAnim();
+
+    const animateMap = (time: number) => {
+      if (mapLastTimeRef.current !== null) {
+        const delta = time - mapLastTimeRef.current;
+        const target = mapModeRef.current === "2d" ? 100 : 0;
+        const current = mapProgressRef.current;
+
+        if (Math.abs(current - target) < 0.3) {
+          // Reached target — snap & stop loop
+          mapProgressRef.current = target;
+          setMapProgress(target);
+          mapAnimRef.current = null;
+          return;
+        }
+
+        const step = delta * 0.22;
+        const next =
+          target === 100
+            ? Math.min(100, current + step)
+            : Math.max(0, current - step);
+
+        mapProgressRef.current = next;
+        setMapProgress(next);
+      }
+
+      mapLastTimeRef.current = time;
+      mapAnimRef.current = requestAnimationFrame(animateMap);
+    };
+
+    mapAnimRef.current = requestAnimationFrame(animateMap);
+  }, [stopMapAnim]);
+
+  // Restart map animation whenever mapMode changes
+  useEffect(() => {
+    startMapAnim();
+    return stopMapAnim;
+  }, [mapMode, startMapAnim, stopMapAnim]);
+
+  // ── Flight Animation Loop ──
+  const requestRef = useRef<number | null>(null);
+  const previousTimeRef = useRef<number | null>(null);
 
   const animate = useCallback((time: number) => {
     if (previousTimeRef.current !== null) {
       const delta = time - previousTimeRef.current;
-      setProgress(prev => {
-        // Reduced speed slightly since SVG projection calculation takes more CPU
-        const next = prev + delta * 0.00008; 
-        if (next >= 1) { 
-          setIsPlaying(false);
-          // Auto-unroll map at impact
-          setMapMode("2d"); 
-          return 1; 
-        }
-        return next;
-      });
+      const next = progressRef.current + delta * 0.00008;
+
+      if (next >= 1) {
+        // Impact — update all state OUTSIDE updater functions
+        progressRef.current = 1;
+        setProgress(1);
+        isPlayingRef.current = false;
+        setIsPlaying(false);
+        // Auto-unroll to 2D at impact
+        mapModeRef.current = "2d";
+        setMapMode("2d");
+        // Stop flight loop
+        if (requestRef.current) cancelAnimationFrame(requestRef.current);
+        requestRef.current = null;
+        previousTimeRef.current = null;
+        return;
+      }
+
+      progressRef.current = next;
+      setProgress(next);
     }
+
     previousTimeRef.current = time;
     requestRef.current = requestAnimationFrame(animate);
   }, []);
 
   useEffect(() => {
     if (isPlaying) {
+      isPlayingRef.current = true;
       requestRef.current = requestAnimationFrame(animate);
     } else {
       previousTimeRef.current = null;
-      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+        requestRef.current = null;
+      }
     }
-    return () => { 
-      if (requestRef.current) cancelAnimationFrame(requestRef.current); 
+    return () => {
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
   }, [isPlaying, animate]);
 
-  // Reset simulation when asteroid changes and derive deterministic target
+  // Reset when asteroid selection changes
   useEffect(() => {
+    progressRef.current = 0;
+    mapProgressRef.current = 0;
     setProgress(0);
     setIsPlaying(false);
-    setMapMode("3d"); // Roll back to globe
-    
+    setMapMode("3d");
+
     if (selectedAsteroid) {
-       // Auto-calculate impact point
-       const metrics = calculateImpactMetrics(selectedAsteroid);
-       setImpactPoint({ lat: metrics.lat, lon: metrics.lon });
+      const metrics = calculateImpactMetrics(selectedAsteroid);
+      setImpactPoint({ lat: metrics.lat, lon: metrics.lon });
     } else {
-       setImpactPoint(null);
+      setImpactPoint(null);
     }
   }, [selectedAsteroid]);
 
-  // ─── Settings bindings
+  // ── Settings bindings ──
   const { dataSource, apiKey, setLastSynced } = useSettings();
 
-  // Fetch initial NASA Data
   useEffect(() => {
     (async () => {
       try {
         setIsLoading(true);
         setError(null);
         const today = new Date();
-        const data  = await fetchAsteroids(
+        const data = await fetchAsteroids(
           format(today, "yyyy-MM-dd"),
           format(addDays(today, 1), "yyyy-MM-dd"),
           dataSource,
           apiKey
         );
-        
-        // Merge objects flattened if offline database has multiple dates mapped
         const flattenObjects = Object.values(data.near_earth_objects).flat() as Asteroid[];
         setAsteroids(flattenObjects);
         setLastSynced(Date.now());
       } catch (e: any) {
         console.error("Simulation error starting NASA API fetch:", e);
         if (e.name === "NasaRateLimitError") {
-           setError("NASA API Rate Limit Exceeded (HTTP 429). Please switch to 'Offline DB' or configure your own API Key in Settings.");
+          setError(
+            "NASA API Rate Limit Exceeded (HTTP 429). Please switch to 'Offline DB' or configure your own API Key in Settings."
+          );
         } else {
-           setError("Failed to fetch tracking data."); 
+          setError("Failed to fetch tracking data.");
         }
-      } finally { 
-        setIsLoading(false); 
+      } finally {
+        setIsLoading(false);
       }
     })();
   }, [dataSource, apiKey]);
 
   const handleReset = () => {
+    progressRef.current = 0;
+    mapProgressRef.current = 0;
     setProgress(0);
     setMapProgress(0);
     setIsPlaying(false);
+    mapModeRef.current = "3d";
+    setMapMode("3d");
   };
 
   return {
@@ -149,6 +203,6 @@ export function useSimulation() {
     mapProgress,
     mapMode,
     setMapMode,
-    handleReset
+    handleReset,
   };
 }
