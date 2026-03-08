@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { format, addDays } from "date-fns";
 import { fetchAsteroids, Asteroid } from "@/services/nasaService";
 import { calculateImpactMetrics } from "@/lib/impactCalculator";
+import { useSettings } from "@/hooks/useSettings";
 
 export function useSimulation() {
   const [asteroids, setAsteroids] = useState<Asteroid[]>([]);
@@ -72,24 +73,39 @@ export function useSimulation() {
     }
   }, [selectedAsteroid]);
 
+  // ─── Settings bindings
+  const { dataSource, apiKey, setLastSynced } = useSettings();
+
   // Fetch initial NASA Data
   useEffect(() => {
     (async () => {
       try {
         setIsLoading(true);
+        setError(null);
         const today = new Date();
         const data  = await fetchAsteroids(
           format(today, "yyyy-MM-dd"),
-          format(addDays(today, 1), "yyyy-MM-dd")
+          format(addDays(today, 1), "yyyy-MM-dd"),
+          dataSource,
+          apiKey
         );
-        setAsteroids(Object.values(data.near_earth_objects).flat() as Asteroid[]);
-      } catch { 
-        setError("Failed to fetch tracking data."); 
+        
+        // Merge objects flattened if offline database has multiple dates mapped
+        const flattenObjects = Object.values(data.near_earth_objects).flat() as Asteroid[];
+        setAsteroids(flattenObjects);
+        setLastSynced(Date.now());
+      } catch (e: any) {
+        console.error("Simulation error starting NASA API fetch:", e);
+        if (e.name === "NasaRateLimitError") {
+           setError("NASA API Rate Limit Exceeded (HTTP 429). Please switch to 'Offline DB' or configure your own API Key in Settings.");
+        } else {
+           setError("Failed to fetch tracking data."); 
+        }
       } finally { 
         setIsLoading(false); 
       }
     })();
-  }, []);
+  }, [dataSource, apiKey]);
 
   const handleReset = () => {
     setProgress(0);

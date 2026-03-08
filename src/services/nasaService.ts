@@ -1,6 +1,5 @@
-const NASA_API_KEY = process.env.NEXT_PUBLIC_NASA_API_KEY || "DEMO_KEY";
-const BASE_URL = "/api/nasa";
-const CACHE_VERSION = "v1";         // bump to invalidate old cache entries
+const BASE_URL = "https://api.nasa.gov/neo/rest/v1";
+const CACHE_VERSION = "v2";         // bumped for new live api caching
 const CACHE_TTL_MS  = 60 * 60 * 1000; // 1 hour in ms
 
 export interface Asteroid {
@@ -33,52 +32,39 @@ export interface NeoFeedResponse {
   };
 }
 
-// ─── Mock fallback when API is unavailable ───────────────────────────────────
-function mockFallback(startDate: string): NeoFeedResponse {
-  return {
-    element_count: 2,
-    near_earth_objects: {
-      [startDate]: [
-        {
-          id: "MOCK-1",
-          name: "Apophis (Mock)",
-          estimated_diameter: {
-            kilometers: { estimated_diameter_min: 0.3, estimated_diameter_max: 0.4 },
-          },
-          is_potentially_hazardous_asteroid: true,
-          close_approach_data: [
-            {
-              close_approach_date: startDate,
-              relative_velocity: { kilometers_per_hour: "105000" },
-              miss_distance: { kilometers: "38000" },
-              orbiting_body: "Earth",
-            },
-          ],
-          is_sentry_object: false,
-        },
-        {
-          id: "MOCK-2",
-          name: "Bennu (Mock)",
-          estimated_diameter: {
-            kilometers: { estimated_diameter_min: 0.4, estimated_diameter_max: 0.5 },
-          },
-          is_potentially_hazardous_asteroid: true,
-          close_approach_data: [
-            {
-              close_approach_date: startDate,
-              relative_velocity: { kilometers_per_hour: "95000" },
-              miss_distance: { kilometers: "300000" },
-              orbiting_body: "Earth",
-            },
-          ],
-          is_sentry_object: true,
-        },
-      ],
-    },
-  };
+// ─── Offline Database ────────────────────────────────────────────────────────
+// Fetches the bundled JSON from public/ if it's not already in localStorage
+async function getOfflineDatabase(): Promise<NeoFeedResponse> {
+  const DB_KEY = "vel_settings_offlineDb";
+  
+  if (typeof window !== "undefined") {
+    const localDb = localStorage.getItem(DB_KEY);
+    if (localDb) {
+      try {
+        const parsed = JSON.parse(localDb);
+        if (parsed.element_count) return parsed;
+      } catch (e) {
+        console.warn("Failed to parse local offline DB, re-fetching...");
+      }
+    }
+  }
+
+  // Fetch the shipped static backup database
+  const res = await fetch("/nasa_data.json");
+  if (!res.ok) throw new Error("Offline DB missing from public folder");
+  
+  const data = await res.json();
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(DB_KEY, JSON.stringify(data));
+    } catch {
+       // local storage is full or disabled
+    }
+  }
+  return data;
 }
 
-// ─── localStorage helpers ────────────────────────────────────────────────────
+// ─── localStorage helpers (For Live caching) ─────────────────────────────────
 function cacheKey(startDate: string, endDate: string) {
   return `nasa_neofeed_${CACHE_VERSION}_${startDate}_${endDate}`;
 }
@@ -93,7 +79,7 @@ function readCache(key: string): NeoFeedResponse | null {
       localStorage.removeItem(key); // expired
       return null;
     }
-    console.info("[NASA] Serving asteroid data from cache.");
+    console.info("[NASA] Serving asteroid live data from fast cache.");
     return data as NeoFeedResponse;
   } catch {
     return null;
@@ -109,34 +95,60 @@ function writeCache(key: string, data: NeoFeedResponse) {
   }
 }
 
+export class NasaRateLimitError extends Error {
+  constructor() {
+    super("NASA API Rate Limit Exceeded (429). Please use the DEMO_KEY or your own API key.");
+    this.name = "NasaRateLimitError";
+  }
+}
+
 // ─── Main fetch function ─────────────────────────────────────────────────────
 export const fetchAsteroids = async (
   startDate: string,
-  endDate: string
+  endDate: string,
+  dataSource: "live" | "offline",
+  apiKey: string,
+  forceNetwork: boolean = false
 ): Promise<NeoFeedResponse> => {
+  
+  // 1. Offline Mode handling
+  if (dataSource === "offline") {
+    console.info("[NASA] Loading from Offline Database");
+    return await getOfflineDatabase();
+  }
+
+  // 2. Live NASA API handling
   const key = cacheKey(startDate, endDate);
+  
+  if (!forceNetwork) {
+    const cached = readCache(key);
+    if (cached) return cached;
+  }
 
-  // 1. Try cache first
-  const cached = readCache(key);
-  if (cached) return cached;
-
-  // 2. Fetch from NASA API
   try {
+    console.info(`[NASA] Fetching live data from api.nasa.gov (forceNetwork: ${forceNetwork})...`);
     const response = await fetch(
-      `${BASE_URL}/feed?start_date=${startDate}&end_date=${endDate}&api_key=${NASA_API_KEY}`
+      `${BASE_URL}/feed?start_date=${startDate}&end_date=${endDate}&api_key=${apiKey}`
     );
 
+    if (response.status === 429) {
+      throw new NasaRateLimitError();
+    }
+    
     if (!response.ok) {
-      console.warn(`NASA API ${response.status} — using mock fallback.`);
-      return mockFallback(startDate);
+      throw new Error(`NASA API ${response.status}`);
     }
 
     const data: NeoFeedResponse = await response.json();
     writeCache(key, data); // persist for 1 hour
     return data;
   } catch (err) {
-    console.warn("NASA API network error — using mock fallback.", err);
-    return mockFallback(startDate);
+    if (err instanceof NasaRateLimitError) {
+      // Re-throw rate limit errors directly to the UI layer
+      throw err;
+    }
+    console.error("NASA API Live Fetch failed, reverting to Offline Database fallback", err);
+    return await getOfflineDatabase();
   }
 };
 

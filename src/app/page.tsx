@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { Target } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Target, Settings } from "lucide-react";
 import { calculateImpactMetrics } from "@/lib/impactCalculator";
 
 import { AsteroidPanel } from "@/components/ui/AsteroidPanel";
@@ -9,6 +9,7 @@ import { ScientificQA } from "@/components/ui/ScientificQA";
 import { SimulationControls } from "@/components/ui/SimulationControls";
 import { D3GlobeMap } from "@/components/ui/D3GlobeMap";
 import { MobileBottomBar } from "@/components/ui/MobileBottomBar";
+import { SettingsDialog } from "@/components/ui/SettingsDialog";
 
 import { useSimulation } from "@/hooks/useSimulation";
 
@@ -28,6 +29,8 @@ export default function Home() {
     setMapProgress,
     handleReset
   } = useSimulation();
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Derived states
   const simRunning = (isPlaying || progress > 0) && progress < 1;
@@ -89,21 +92,28 @@ export default function Home() {
           )}
 
           {/* ── Top title bar ── */}
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-zinc-950/75 backdrop-blur-md border border-zinc-800 rounded-full px-5 py-2 shadow-[0_0_20px_rgba(0,180,255,0.1)] pointer-events-none">
-            <Target className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="text-[11px] font-mono font-semibold uppercase tracking-[0.25em] text-zinc-300">
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-zinc-950/75 backdrop-blur-md border border-zinc-800 rounded-full pl-5 pr-2 py-2 shadow-[0_0_20px_rgba(0,180,255,0.1)] pointer-events-auto">
+            <Target className="w-3.5 h-3.5 text-cyan-400 pointer-events-none" />
+            <span className="text-[11px] font-mono font-semibold uppercase tracking-[0.25em] text-zinc-300 pointer-events-none">
               Velocity / Asteroid Impact Simulator
             </span>
             {simRunning && (
-              <span className="text-[9px] font-mono text-cyan-400 animate-pulse uppercase tracking-widest border-l border-zinc-700 pl-3">
+              <span className="text-[9px] font-mono text-cyan-400 animate-pulse uppercase tracking-widest border-l border-zinc-700 pl-3 pointer-events-none">
                 Simulation Running
               </span>
             )}
             {simComplete && (
-              <span className="text-[9px] font-mono text-red-400 animate-pulse uppercase tracking-widest border-l border-zinc-700 pl-3">
+              <span className="text-[9px] font-mono text-red-400 animate-pulse uppercase tracking-widest border-l border-zinc-700 pl-3 pointer-events-none">
                 Impact Confirmed
               </span>
             )}
+            <div className="w-px h-4 bg-zinc-800 ml-2" />
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-1.5 hover:bg-zinc-800 rounded-full transition-colors group"
+            >
+              <Settings className="w-4 h-4 text-zinc-500 group-hover:text-cyan-400 transition-colors" />
+            </button>
           </div>
 
         {/* ── Left panel (asteroid selector) ── */}
@@ -141,6 +151,8 @@ export default function Home() {
 
           {/* ── AI assistant ── */}
           <ScientificQA />
+          
+          <SettingsDialog isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
         </>
       )}
     </main>

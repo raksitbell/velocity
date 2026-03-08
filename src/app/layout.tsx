@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
+import React from "react";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import { SettingsProvider } from "@/hooks/useSettings";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "Velocity - Asteroid Simulator",
-  description: "Predict and simulate asteroid impacts using real-time NASA NeoWS data.",
+  title: "Velocity",
+  description: "Orbital telemetry and tracking interface",
 };
 
 export default function RootLayout({
@@ -15,9 +17,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
-      <body className={`${inter.className} bg-black text-white antialiased overflow-hidden`} suppressHydrationWarning>
-        {children}
+    <html lang="en">
+      <body className={`${inter.variable} font-sans antialiased bg-black text-white`}>
+        <SettingsProvider>
+          {children}
+        </SettingsProvider>
       </body>
     </html>
   );

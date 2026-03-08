@@ -7,7 +7,12 @@ import { Play, Pause, RotateCcw, Crosshair, MapPin, Flame, Skull, Waves, ArrowRi
 import { format } from "date-fns";
 import * as THREE from "three";
 import { calculateImpactMetrics, ImpactMetrics } from "@/lib/impactCalculator";
-import { IsometricImpactMap } from "./IsometricImpactMap";
+import dynamic from "next/dynamic";
+
+const IsometricImpactMap = dynamic(
+  () => import("./IsometricImpactMap").then(mod => mod.IsometricImpactMap), 
+  { ssr: false, loading: () => <div className="w-full h-56 rounded-xl bg-zinc-900 border border-zinc-800 animate-pulse flex items-center justify-center text-xs text-zinc-500 font-mono tracking-widest uppercase">Loading Radar...</div> }
+);
 
 interface SimulationControlsProps {
   selectedAsteroid: Asteroid | null;
