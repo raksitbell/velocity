@@ -16,7 +16,7 @@ interface SimulationControlsProps {
   progress: number; // 0 to 1
   setProgress: (val: number) => void;
   onReset: () => void;
-  customImpactPoint?: THREE.Vector3 | null;
+  impactPoint?: { lat: number, lon: number } | null;
 }
 
 export function SimulationControls({
@@ -26,7 +26,7 @@ export function SimulationControls({
   progress,
   setProgress,
   onReset,
-  customImpactPoint
+  impactPoint
 }: SimulationControlsProps) {
   const [metrics, setMetrics] = useState<ImpactMetrics | null>(null);
   const [locationName, setLocationName] = useState<string>("Calculating...");
@@ -49,14 +49,9 @@ export function SimulationControls({
     if (!selectedAsteroid) return;
 
     // Only calc metrics exactly at impact to save performance
-    if (progress >= 1 && !metrics) {
-      const seed = selectedAsteroid.id.length;
-      const endX = Math.cos(seed) * 2.1;
-      const endY = Math.sin(seed) * 2.1;
-      const endZ = Math.cos(seed + 1) * 2.1;
-      const impactPoint = customImpactPoint || new THREE.Vector3(endX, endY, endZ);
+    if (progress >= 1 && !metrics && impactPoint) {
       
-      const m = calculateImpactMetrics(selectedAsteroid, impactPoint, 2.0);
+      const m = calculateImpactMetrics(selectedAsteroid);
       setMetrics(m);
 
       // Fetch real-world location data via open-source API

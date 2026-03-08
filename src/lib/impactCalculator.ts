@@ -31,29 +31,34 @@ export interface ImpactMetrics {
 const ASTEROID_DENSITY = 3000; 
 
 /**
- * Calculates devastation metrics using simplified kinetic physics equations.
+ * Deterministic pseudo-random number generator based on a string seed (Asteroid ID).
+ * Returns a float between 0 and 1.
  */
-export function calculateImpactMetrics(asteroid: Asteroid, impactPoint: THREE.Vector3, earthRadius: number): ImpactMetrics {
-  // Convert 3D click point → geographic lat/lon
-  //
-  // THREE.SphereGeometry vertex equations (from source):
-  //   x = -cos(phi) * sin(theta)
-  //   y =  cos(theta)
-  //   z =  sin(phi) * sin(theta)
-  //
-  // Therefore:  phi = atan2(z, -x)
-  //             theta = acos(y)  →  lat = 90 - theta
-  //
-  // UV mapping: u = phi / 2PI  (0 at X-, 0.25 at Z+, 0.5 at X+, 0.75 at Z-)
-  // NASA texture: u=0 → lon -180°, u=0.5 → lon 0°, u=1 → lon 180°
-  // So: lon = phi * 180/PI - 180, then normalise to [-180, 180]
-  const normalized = impactPoint.clone().normalize();
-  const latRads = Math.asin(Math.max(-1, Math.min(1, normalized.y)));
-  let lon = Math.atan2(normalized.z, -normalized.x) * (180 / Math.PI) - 180;
-  if (lon <= -180) lon += 360;  // normalise from (-360, 0] to (-180, 180]
-  const lat = latRads * (180 / Math.PI);
+function seededRandom(seedStr: string): number {
+  let hash = 0;
+  for (let i = 0; i < seedStr.length; i++) {
+    const char = seedStr.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  const x = Math.sin(hash++) * 10000;
+  return x - Math.floor(x);
+}
 
-  // Approximate land vs water (simple seeded pseudorandom approach based on coordinates for demo purposes)
+/**
+ * Calculates devastation metrics using simplified kinetic physics equations.
+ * Impact location is deterministically generated from the asteroid ID.
+ */
+export function calculateImpactMetrics(asteroid: Asteroid): ImpactMetrics {
+  // Deterministic impact coordinates
+  // Range: Lat -90 to 90, Lon -180 to 180
+  const latSeed = seededRandom(asteroid.id + "_lat");
+  const lonSeed = seededRandom(asteroid.id + "_lon");
+  
+  const lat = (latSeed * 180) - 90;
+  const lon = (lonSeed * 360) - 180;
+
+  // Approximate land vs water (simple seeded pseudorandom approach based on coordinates)
   const landSeed = Math.abs(Math.sin(lat * 12.9898 + lon * 78.233)) * 43758.5453;
   const isWater = (landSeed - Math.floor(landSeed)) > 0.3; // Roughly 70% of Earth is water
 

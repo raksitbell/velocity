@@ -8,17 +8,17 @@ import { AlertTriangle, ShieldCheck, Menu, X, Target, ChevronRight } from "lucid
 interface AsteroidPanelProps {
   asteroids: Asteroid[];
   selectedAsteroid: Asteroid | null;
-  setSelectedAsteroid: (val: Asteroid | null) => void;
-  confirmed: boolean;
-  onLaunch?: () => void;
+  onSelectAsteroid: (val: Asteroid | null) => void;
+  isLoading: boolean;
+  onStartSimulation?: () => void;
 }
 
 export function AsteroidPanel({
   asteroids,
   selectedAsteroid,
-  setSelectedAsteroid,
-  confirmed,
-  onLaunch,
+  onSelectAsteroid,
+  isLoading,
+  onStartSimulation,
 }: AsteroidPanelProps) {
   // Start closed on mobile so the globe is visible by default.
   // Open automatically on desktop (≥ 768 px) after hydration.
@@ -85,7 +85,7 @@ export function AsteroidPanel({
                 <span>Detected Objects ({sorted.length})</span>
                 {selectedAsteroid && (
                   <button
-                    onClick={() => setSelectedAsteroid(null)}
+                    onClick={() => onSelectAsteroid(null)}
                     className="text-cyan-400 hover:text-cyan-300 transition-colors"
                   >
                     Clear
@@ -101,7 +101,7 @@ export function AsteroidPanel({
                   <div
                     key={asteroid.id}
                     onClick={() => {
-                      setSelectedAsteroid(asteroid);
+                      onSelectAsteroid(asteroid);
                       // Auto-dismiss sidebar on mobile so the globe is immediately visible
                       if (typeof window !== "undefined" && window.innerWidth < 768) {
                         setIsOpen(false);
@@ -132,7 +132,7 @@ export function AsteroidPanel({
                       </h3>
                       {isSelected && (
                         <div className="flex items-center gap-1 text-cyan-400 text-xs font-medium animate-pulse">
-                          Targeting <ChevronRight className="w-3 h-3" />
+                          Target Locked <ChevronRight className="w-3 h-3" />
                         </div>
                       )}
                     </div>
@@ -175,14 +175,14 @@ export function AsteroidPanel({
               })}
             </div>
 
-            {/* Confirm Target — desktop only; mobile has its own floating bar */}
-            {selectedAsteroid && !confirmed && (
+            {/* Launch Simulation — desktop only; mobile has its own floating bar */}
+            {selectedAsteroid && (
               <div className="hidden md:block p-6 border-t border-white/10 bg-black/60">
                 <button
                   onClick={() => {
                     if (!launched) {
                       setLaunched(true);
-                      onLaunch?.();
+                      onStartSimulation?.();
                     }
                   }}
                   disabled={launched}
@@ -193,7 +193,7 @@ export function AsteroidPanel({
                   }`}
                 >
                   <Target className="w-4 h-4" />
-                  {launched ? "Target Locked — Simulation Running" : "Confirm Target"}
+                  {launched ? "Simulation Running" : "Launch Simulation"}
                 </button>
               </div>
             )}
