@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Asteroid } from "@/services/nasaService";
 import { motion, AnimatePresence } from "framer-motion";
 import { Play, Pause, RotateCcw, Crosshair, MapPin, Flame, Skull, Waves, ArrowRight, Target } from "lucide-react";
@@ -36,6 +36,9 @@ export function SimulationControls({
   const [metrics, setMetrics] = useState<ImpactMetrics | null>(null);
   const [locationName, setLocationName] = useState<string>("Calculating...");
   
+  // Mobile bottom sheet expansion
+  const [isExpanded, setIsExpanded] = useState(false);
+  const touchStartY = useRef(0);
 
 
   // Derive simulation dates based on progress
@@ -80,9 +83,9 @@ export function SimulationControls({
   const currentDate = new Date(startDate.getTime() + (approachDate.getTime() - startDate.getTime()) * progress);
 
   // Mobile: bottom sheet after impact
-  // Desktop: always show as LEFT panel
+  // transition-[max-height] ensures smooth expansion
   const mobileClass = progress >= 1
-    ? "fixed bottom-0 left-0 right-0 max-h-[50vh] md:max-h-none w-full rounded-t-2xl md:rounded-none md:top-0 md:left-0 md:bottom-auto md:right-auto md:h-full md:w-[420px]"
+    ? `fixed bottom-0 left-0 right-0 w-full rounded-t-2xl flex flex-col z-40 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] overflow-hidden transition-[max-height] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${isExpanded ? 'max-h-[85vh]' : 'max-h-[50vh]'} md:max-h-none md:rounded-none md:top-0 md:left-0 md:bottom-auto md:right-auto md:h-full md:w-[420px]`
     : "hidden md:flex md:fixed md:top-0 md:left-0 md:h-full md:w-[420px]";
 
   return (
@@ -94,8 +97,20 @@ export function SimulationControls({
         className={`${mobileClass} bg-zinc-950/85 backdrop-blur-2xl border-r border-white/10 z-30 flex flex-col shadow-2xl overflow-hidden`}
       >
         {/* Drag handle on mobile / spacer on desktop */}
-        <div className="md:hidden flex justify-center py-2 shrink-0">
-          <div className="w-10 h-1 rounded-full bg-white/20" />
+        <div 
+          className="md:hidden flex flex-col items-center justify-center py-4 shrink-0 cursor-grab active:cursor-grabbing"
+          onClick={() => setIsExpanded(!isExpanded)}
+          onTouchStart={(e) => { touchStartY.current = e.touches[0].clientY; }}
+          onTouchEnd={(e) => {
+            const dy = e.changedTouches[0].clientY - touchStartY.current;
+            if (dy < -30) setIsExpanded(true);  // Swiped up -> expand
+            if (dy > 30) setIsExpanded(false);  // Swiped down -> collapse
+          }}
+        >
+          <div className="w-12 h-1.5 rounded-full bg-white/20 mb-1" />
+          <div className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest">
+            {isExpanded ? 'Swipe down to close' : 'Swipe up to expand'}
+          </div>
         </div>
         <div className="hidden md:block h-[68px] shrink-0" />
 
