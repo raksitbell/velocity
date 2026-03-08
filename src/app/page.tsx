@@ -49,7 +49,8 @@ export default function Home() {
   }, [progress, selectedAsteroid, impactPoint]);
 
 
-  if (error) {
+  // Only show full-screen for genuine failures; rate_limited shows inline banner
+  if (error && error !== "rate_limited") {
     return (
       <div className="flex h-screen items-center justify-center bg-black text-white p-4 text-center">
         <div>
@@ -74,6 +75,7 @@ export default function Home() {
           onMapModeChange={setMapMode}
           impactPoint={impactPoint}
           onAsteroidScreenPos={onAsteroidScreenPos}
+          simComplete={simComplete}
         />
       )}
 
@@ -89,7 +91,15 @@ export default function Home() {
 
       {!isLoading && (
         <>
-          {/* ── Impact flash (Screen Flash css animation exists in globals.css) ── */}
+          {/* ── Rate-limit banner (non-blocking) ── */}
+          {error === "rate_limited" && (
+            <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-amber-950/90 backdrop-blur border border-amber-500/40 text-amber-300 px-4 py-2.5 rounded-xl shadow-xl text-xs font-medium pointer-events-none">
+              <span className="text-amber-400">⚠</span>
+              NASA API rate limit hit — loaded offline data. Set your API key in Settings.
+            </div>
+          )}
+
+          {/* ── Impact flash ── */}
           {simComplete && (
             <div
               key={`flash-${progress}`}
@@ -97,27 +107,23 @@ export default function Home() {
             />
           )}
 
-        {/* ── Left panel (asteroid selector) ── */}
-        <div className="absolute inset-x-0 bottom-0 md:relative md:inset-auto pointer-events-none z-10 w-full md:w-auto h-full flex flex-col justify-end md:justify-start">
-           {/* Desktop panel mapping */}
-           <div className="hidden md:block h-full border-r border-white/10 shrink-0 pointer-events-auto shadow-2xl overflow-hidden w-[350px]">
-              <AsteroidPanel
-                asteroids={asteroids}
-                selectedAsteroid={selectedAsteroid}
-                onSelectAsteroid={setSelectedAsteroid}
-                isLoading={isLoading}
-                onStartSimulation={() => setIsPlaying(true)}
-                onOpenSettings={() => setIsSettingsOpen(true)}
-                simRunning={simRunning}
-                simComplete={simComplete}
-              />
-           </div>
-        </div>
+        {/* ── Asteroid dropdown selector (floating, unmounted wrapper) ── */}
+        <AsteroidPanel
+          asteroids={asteroids}
+          selectedAsteroid={selectedAsteroid}
+          onSelectAsteroid={setSelectedAsteroid}
+          isLoading={isLoading}
+          onStartSimulation={() => setIsPlaying(true)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          simRunning={simRunning}
+          simComplete={simComplete}
+        />
 
       {selectedAsteroid && (
          <FlightTelemetryHUD
            selectedAsteroid={selectedAsteroid}
            progress={progress}
+           impactPoint={impactPoint}
            asteroidScreenPos={astScreenPos}
          />
       )}

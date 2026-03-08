@@ -96,9 +96,7 @@ export function useSimulation() {
         setProgress(1);
         isPlayingRef.current = false;
         setIsPlaying(false);
-        // Auto-unroll to 2D at impact
-        mapModeRef.current = "2d";
-        setMapMode("2d");
+        // Keep current map view — do not auto-switch to 2D
         // Stop flight loop
         if (requestRef.current) cancelAnimationFrame(requestRef.current);
         requestRef.current = null;
@@ -147,7 +145,7 @@ export function useSimulation() {
   }, [selectedAsteroid]);
 
   // ── Settings bindings ──
-  const { dataSource, apiKey, setLastSynced } = useSettings();
+  const { dataSource, apiKey, setLastSynced, setDataSource } = useSettings();
 
   useEffect(() => {
     (async () => {
@@ -167,9 +165,22 @@ export function useSimulation() {
       } catch (e: any) {
         console.error("Simulation error starting NASA API fetch:", e);
         if (e.name === "NasaRateLimitError") {
-          setError(
-            "NASA API Rate Limit Exceeded (HTTP 429). Please switch to 'Offline DB' or configure your own API Key in Settings."
-          );
+          // Rate-limited — silently fall back to offline DB, keep the app running
+          try {
+            const fallbackData = await fetchAsteroids(
+              format(new Date(), "yyyy-MM-dd"),
+              format(addDays(new Date(), 1), "yyyy-MM-dd"),
+              "offline",
+              apiKey
+            );
+            const flat = Object.values(fallbackData.near_earth_objects).flat() as Asteroid[];
+            setAsteroids(flat);
+            // Switch setting to offline so future loads don't re-hit the limit
+            setDataSource("offline");
+            setError("rate_limited"); // non-blocking signal for UI banner only
+          } catch {
+            setError("Failed to load offline data.");
+          }
         } else {
           setError("Failed to fetch tracking data.");
         }

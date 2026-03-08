@@ -30,13 +30,14 @@ interface D3GlobeMapProps {
   onMapModeChange: (mode: "3d" | "2d") => void;
   impactPoint: { lat: number; lon: number } | null;
   onAsteroidScreenPos?: (x: number, y: number) => void;
+  simComplete?: boolean;
 }
 
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 4.0;
 
 export function D3GlobeMap({
-  selectedAsteroid, progress, mapProgress, mapMode, onMapModeChange, impactPoint, onAsteroidScreenPos,
+  selectedAsteroid, progress, mapProgress, mapMode, onMapModeChange, impactPoint, onAsteroidScreenPos, simComplete,
 }: D3GlobeMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [worldData, setWorldData] = useState<GeoFeature[]>([]);
@@ -84,6 +85,8 @@ export function D3GlobeMap({
       .then((world: any) => {
         const countries = (feature(world, world.objects.countries as any) as any).features;
         setWorldData(countries as GeoFeature[]);
+        // Force initial D3 render by nudging rotation state
+        setRotation([0.001, 0]);
       }).catch(console.error);
   }, []);
 
@@ -287,7 +290,9 @@ export function D3GlobeMap({
   }, [worldData, progress, rotation, dimensions, mapProgress, impactPoint, selectedAsteroid, userZoom]);
 
   return (
-    <div className="absolute inset-0 bg-black flex items-center justify-center overflow-hidden">
+    <div className={`absolute inset-0 bg-black flex items-center justify-center overflow-hidden transition-[padding] duration-300 ${
+      simComplete ? 'pb-[50vh] md:pb-0' : ''
+    }`}>
       <svg
         ref={svgRef}
         width={dimensions.width}
@@ -299,6 +304,21 @@ export function D3GlobeMap({
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
+        onTouchStart={(e) => {
+          const t = e.touches[0];
+          lastMouseRef.current = [t.clientX, t.clientY];
+          isDraggingRef.current = true;
+        }}
+        onTouchMove={(e) => {
+          if (!isDraggingRef.current) return;
+          const t = e.touches[0];
+          const dx = t.clientX - lastMouseRef.current[0];
+          const dy = t.clientY - lastMouseRef.current[1];
+          lastMouseRef.current = [t.clientX, t.clientY];
+          rotRef.current = [rotRef.current[0] + dx * 0.3, Math.max(-90, Math.min(90, rotRef.current[1] - dy * 0.3))];
+          setRotation([...rotRef.current]);
+        }}
+        onTouchEnd={() => { isDraggingRef.current = false; }}
       >
         <defs>
           <linearGradient id="asteroidTrail" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -308,24 +328,36 @@ export function D3GlobeMap({
         </defs>
       </svg>
 
-      {/* Zoom Controls */}
-      <div className="absolute bottom-32 right-4 md:bottom-16 md:right-[490px] z-20 flex flex-col gap-1.5">
-        <button onClick={() => setUserZoom(z => Math.min(MAX_ZOOM, z * 1.25))}
-          className="w-9 h-9 bg-zinc-900/80 backdrop-blur border border-zinc-700 text-white rounded-lg hover:bg-zinc-800 flex items-center justify-center transition-colors shadow-lg" title="Zoom In">
+      {/* Zoom Controls — bottom-right, clear of the bottom sheet on mobile */}
+      <div className={`absolute right-4 z-20 flex flex-col items-center gap-1.5 transition-[bottom] duration-300 ${
+        simComplete ? 'bottom-[calc(50vh+12px)] md:bottom-8' : 'bottom-8'
+      }`}>
+        <button
+          onClick={() => setUserZoom(z => Math.min(MAX_ZOOM, z * 1.25))}
+          className="w-10 h-10 md:w-9 md:h-9 bg-zinc-900/80 backdrop-blur border border-zinc-700 text-white rounded-xl hover:bg-zinc-800 flex items-center justify-center transition-colors shadow-lg"
+          title="Zoom In"
+        >
           <ZoomIn className="w-4 h-4" />
         </button>
-        <button onClick={() => setUserZoom(z => Math.max(MIN_ZOOM, z * 0.8))}
-          className="w-9 h-9 bg-zinc-900/80 backdrop-blur border border-zinc-700 text-white rounded-lg hover:bg-zinc-800 flex items-center justify-center transition-colors shadow-lg" title="Zoom Out">
+        <button
+          onClick={() => setUserZoom(z => Math.max(MIN_ZOOM, z * 0.8))}
+          className="w-10 h-10 md:w-9 md:h-9 bg-zinc-900/80 backdrop-blur border border-zinc-700 text-white rounded-xl hover:bg-zinc-800 flex items-center justify-center transition-colors shadow-lg"
+          title="Zoom Out"
+        >
           <ZoomOut className="w-4 h-4" />
         </button>
         <div className="text-[9px] text-center font-mono text-zinc-500">{(userZoom * 100).toFixed(0)}%</div>
       </div>
 
-      {/* 2D/3D Toggle */}
-      <div className="absolute bottom-24 right-4 md:bottom-6 md:right-[490px] z-20">
-        <button onClick={() => onMapModeChange(mapMode === "3d" ? "2d" : "3d")}
-          className="bg-zinc-900/80 backdrop-blur border border-zinc-700 text-xs text-white px-4 py-2 rounded-full hover:bg-zinc-800 transition-colors shadow-lg">
-          {mapMode === "3d" ? "Unroll to 2D Map" : "Roll to 3D Globe"}
+      {/* 2D/3D Toggle — above zoom controls */}
+      <div className={`absolute right-4 z-20 transition-[bottom] duration-300 ${
+        simComplete ? 'bottom-[calc(50vh+88px)] md:bottom-36' : 'bottom-36'
+      }`}>
+        <button
+          onClick={() => onMapModeChange(mapMode === "3d" ? "2d" : "3d")}
+          className="bg-zinc-900/80 backdrop-blur border border-zinc-700 text-xs text-white px-3 py-2.5 md:px-4 rounded-full hover:bg-zinc-800 transition-colors shadow-lg whitespace-nowrap"
+        >
+          {mapMode === "3d" ? "→ 2D Map" : "→ 3D Globe"}
         </button>
       </div>
     </div>

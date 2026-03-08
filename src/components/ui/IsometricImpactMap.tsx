@@ -32,7 +32,7 @@ export function IsometricImpactMap({ lat, lon, isWater, fireballKm = 50, evacuKm
 
       // If map already exists, fly to new coordinates and update circles
       if (instanceRef.current) {
-        instanceRef.current.flyTo([lat, lon], 8, { duration: 1.2 });
+        instanceRef.current.flyTo([lat, lon], 3, { duration: 1.2 });
         return;
       }
 
@@ -42,8 +42,8 @@ export function IsometricImpactMap({ lat, lon, isWater, fireballKm = 50, evacuKm
 
       const map = L.map(mapRef.current as HTMLElement, {
         center: [lat, lon],
-        zoom: 8,
-        zoomControl: false,        // we add it manually below at bottomright
+        zoom: 3,
+        zoomControl: false,
         attributionControl: false,
         scrollWheelZoom: true,
         dragging: true,

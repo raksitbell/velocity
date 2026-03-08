@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Asteroid } from "@/services/nasaService";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertTriangle, ShieldCheck, Menu, X, Target, Settings } from "lucide-react";
+import { AlertTriangle, ShieldCheck, Target, Settings, ChevronDown, X, Search } from "lucide-react";
 
 interface AsteroidPanelProps {
   asteroids: Asteroid[];
@@ -26,211 +26,194 @@ export function AsteroidPanel({
   simRunning,
   simComplete,
 }: AsteroidPanelProps) {
-  // Start closed on mobile so the globe is visible by default.
-  // Open automatically on desktop (≥ 768 px) after hydration.
   const [isOpen, setIsOpen] = useState(false);
-
-  useEffect(() => {
-    const open = window.innerWidth >= 768;
-    setIsOpen(open);
-  }, []);
   const [launched, setLaunched] = useState(false);
+  const [search, setSearch] = useState("");
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Reset launch lock when a different asteroid is selected
+  useEffect(() => { setLaunched(false); }, [selectedAsteroid]);
+
+  // Close on outside click
   useEffect(() => {
-    setLaunched(false);
-  }, [selectedAsteroid]);
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   // Sort: hazardous first
-  const sorted = [...asteroids].sort(
-    (a, b) =>
-      Number(b.is_potentially_hazardous_asteroid) -
-      Number(a.is_potentially_hazardous_asteroid)
-  );
+  const sorted = [...asteroids]
+    .sort((a, b) => Number(b.is_potentially_hazardous_asteroid) - Number(a.is_potentially_hazardous_asteroid))
+    .filter(a => !search || a.name.toLowerCase().includes(search.toLowerCase()) || a.id.includes(search));
+
+  const hazCount = asteroids.filter(a => a.is_potentially_hazardous_asteroid).length;
 
   return (
     <>
-      {/* Mobile toggle button — always visible when panel is closed */}
-      {!isOpen && (
+      {/* ── Compact trigger pill — top-left ── */}
+      <div ref={dropdownRef} className="fixed top-4 left-4 z-40">
+        {/* Trigger Button */}
         <button
-          onClick={() => setIsOpen(true)}
-          className="fixed top-4 left-4 z-50 p-3 bg-zinc-900/80 backdrop-blur-xl border border-white/10 rounded-full text-white shadow-xl"
+          onClick={() => setIsOpen(v => !v)}
+          className={`flex items-center gap-2 px-3 py-2 rounded-xl backdrop-blur-2xl border text-sm font-medium transition-all shadow-xl ${
+            isOpen
+              ? "bg-zinc-900/95 border-cyan-500/60 text-cyan-400"
+              : "bg-zinc-900/80 border-white/10 text-white hover:border-white/30"
+          }`}
         >
-          <Menu className="w-5 h-5" />
+          <Target className="w-4 h-4 text-cyan-400 shrink-0" />
+          <div className="text-left min-w-0">
+            <div className="text-[11px] font-bold truncate max-w-[140px]">
+              {selectedAsteroid ? selectedAsteroid.name : "Select Target"}
+            </div>
+            <div className="text-[9px] text-zinc-500 leading-none mt-0.5">
+              {simRunning ? (
+                <span className="text-cyan-400 animate-pulse">● Running</span>
+              ) : simComplete ? (
+                <span className="text-red-400 animate-pulse">● Impact</span>
+              ) : selectedAsteroid ? (
+                <span className="text-emerald-400">● Locked</span>
+              ) : (
+                `${asteroids.length} objects · ${hazCount} hazardous`
+              )}
+            </div>
+          </div>
+          <ChevronDown className={`w-3.5 h-3.5 text-zinc-500 shrink-0 transition-transform ${isOpen ? "rotate-180" : ""}`} />
         </button>
-      )}
 
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ x: -400, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: -400, opacity: 0 }}
-            className="fixed top-0 left-0 h-full w-[85vw] sm:w-80 md:w-96 bg-black/40 backdrop-blur-2xl border-r border-white/10 z-30 flex flex-col shadow-2xl"
+        {/* Settings gear — inline */}
+        {onOpenSettings && (
+          <button
+            onClick={onOpenSettings}
+            className="absolute top-1/2 -translate-y-1/2 -right-10 p-2 rounded-lg bg-zinc-900/80 backdrop-blur border border-white/10 text-zinc-500 hover:text-cyan-400 transition-colors"
+            title="Settings"
           >
-            {/* Header */}
-            <div className="p-5 border-b border-white/10 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <Target className="w-5 h-5 text-cyan-400 shrink-0" />
-                <div className="min-w-0">
-                  <h1 className="text-lg font-bold bg-gradient-to-r from-cyan-400 to-white bg-clip-text text-transparent leading-none">
-                    Velocity
-                  </h1>
-                  {simRunning && (
-                    <span className="text-[9px] font-mono text-cyan-400 animate-pulse uppercase tracking-widest">
-                      Simulation Running
-                    </span>
+            <Settings className="w-3.5 h-3.5" />
+          </button>
+        )}
+
+        {/* ── Dropdown Modal ── */}
+        <AnimatePresence>
+          {isOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -8, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -8, scale: 0.97 }}
+              transition={{ duration: 0.15, ease: "easeOut" }}
+              className="absolute top-[calc(100%+8px)] left-0 w-80 bg-zinc-950/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+            >
+              {/* Modal header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                <span className="text-xs font-bold uppercase tracking-widest text-zinc-400">
+                  Detected Objects ({asteroids.length})
+                </span>
+                <div className="flex items-center gap-2">
+                  {selectedAsteroid && (
+                    <button
+                      onClick={() => { onSelectAsteroid(null); setIsOpen(false); }}
+                      className="text-[10px] text-cyan-400 hover:text-cyan-300 font-medium transition-colors"
+                    >
+                      Clear
+                    </button>
                   )}
-                  {simComplete && !simRunning && (
-                    <span className="text-[9px] font-mono text-red-400 animate-pulse uppercase tracking-widest">
-                      Impact Confirmed
-                    </span>
-                  )}
-                  {!simRunning && !simComplete && (
-                    <span className="text-[9px] text-zinc-500 uppercase tracking-wider">Asteroid Impact Simulator</span>
-                  )}
+                  <button onClick={() => setIsOpen(false)} className="text-zinc-600 hover:text-white transition-colors">
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                {onOpenSettings && (
-                  <button
-                    onClick={onOpenSettings}
-                    className="p-1.5 hover:bg-white/10 rounded-lg transition-colors group"
-                    title="Settings"
-                  >
-                    <Settings className="w-4 h-4 text-zinc-500 group-hover:text-cyan-400 transition-colors" />
-                  </button>
-                )}
-                <button
-                  onClick={() => setIsOpen(false)}
-                  className="md:hidden p-1.5 text-zinc-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
 
-            {/* Asteroid list */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4 scrollbar-thin scrollbar-thumb-white/10">
-              <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2 flex justify-between items-center">
-                <span>Detected Objects ({sorted.length})</span>
-                {selectedAsteroid && (
-                  <button
-                    onClick={() => onSelectAsteroid(null)}
-                    className="text-cyan-400 hover:text-cyan-300 transition-colors"
-                  >
-                    Clear
-                  </button>
-                )}
+              {/* Search */}
+              <div className="px-3 pt-3 pb-2">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Search by name or ID..."
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 bg-white/5 border border-white/10 rounded-lg text-xs text-white placeholder-zinc-600 outline-none focus:border-cyan-500/50 transition-colors"
+                  />
+                </div>
               </div>
 
-              {sorted.map((asteroid) => {
-                const isSelected = selectedAsteroid?.id === asteroid.id;
-                const isHazardous = asteroid.is_potentially_hazardous_asteroid;
-
-                return (
-                  <div
-                    key={asteroid.id}
-                    onClick={() => {
-                      onSelectAsteroid(asteroid);
-                      // Auto-dismiss sidebar on mobile so the globe is immediately visible
-                      if (typeof window !== "undefined" && window.innerWidth < 768) {
-                        setIsOpen(false);
-                      }
-                    }}
-                    className={`group relative p-4 rounded-xl border transition-all cursor-pointer overflow-hidden ${
-                      isSelected
-                        ? "border-cyan-500/50 bg-cyan-900/20 shadow-[0_0_15px_rgba(6,182,212,0.15)]"
-                        : "border-white/5 bg-white/5 hover:bg-white/10"
-                    }`}
-                  >
-                    <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-transparent via-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-
-                    <div className="flex justify-between items-start mb-2">
-                      <h3
-                        className={`font-semibold transition-colors flex items-center gap-2 ${
+              {/* List */}
+              <div className="max-h-72 overflow-y-auto px-3 pb-3 space-y-1.5 scrollbar-thin scrollbar-thumb-white/10">
+                {isLoading ? (
+                  <div className="py-6 text-center text-xs text-zinc-500 animate-pulse">Loading orbital data…</div>
+                ) : sorted.length === 0 ? (
+                  <div className="py-6 text-center text-xs text-zinc-500">No objects match "{search}"</div>
+                ) : (
+                  sorted.map((asteroid) => {
+                    const isSelected = selectedAsteroid?.id === asteroid.id;
+                    const isHazardous = asteroid.is_potentially_hazardous_asteroid;
+                    return (
+                      <div
+                        key={asteroid.id}
+                        onClick={() => {
+                          onSelectAsteroid(asteroid);
+                          setIsOpen(false);
+                        }}
+                        className={`group flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border ${
                           isSelected
-                            ? "text-cyan-400"
-                            : "text-white group-hover:text-cyan-300"
+                            ? "border-cyan-500/40 bg-cyan-900/20"
+                            : "border-transparent hover:border-white/10 hover:bg-white/5"
                         }`}
                       >
-                        {asteroid.name}
-                        {isHazardous ? (
-                          <AlertTriangle className="w-4 h-4 text-orange-400 fill-orange-400/20" />
-                        ) : (
-                          <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                        )}
-                      </h3>
-                      {isSelected && (
-                        <div className="flex items-center gap-1 text-cyan-400 text-xs font-medium animate-pulse">
-                          Target Locked →
+                        {/* Hazard indicator */}
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                          isHazardous ? "bg-orange-500/15 text-orange-400" : "bg-emerald-500/15 text-emerald-400"
+                        }`}>
+                          {isHazardous
+                            ? <AlertTriangle className="w-3.5 h-3.5 fill-current" />
+                            : <ShieldCheck className="w-3.5 h-3.5" />}
                         </div>
-                      )}
-                    </div>
 
-                    <div className="grid grid-cols-2 gap-y-3 gap-x-4 mt-4 text-sm">
-                      <div>
-                        <div className="text-zinc-500 text-xs">Diameter (max)</div>
-                        <div className="text-zinc-200">
-                          {asteroid.estimated_diameter.kilometers.estimated_diameter_max.toFixed(2)} km
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <div className={`text-xs font-semibold truncate ${isSelected ? "text-cyan-400" : "text-white group-hover:text-cyan-300"}`}>
+                            {asteroid.name}
+                          </div>
+                          <div className="text-[10px] text-zinc-500 mt-0.5 font-mono">
+                            Ø {asteroid.estimated_diameter.kilometers.estimated_diameter_max.toFixed(2)} km
+                            {" · "}
+                            {(parseFloat(asteroid.close_approach_data[0]?.relative_velocity.kilometers_per_hour || "0") / 3600).toFixed(1)} km/s
+                          </div>
                         </div>
-                      </div>
-                      <div>
-                        <div className="text-zinc-500 text-xs">Velocity</div>
-                        <div className="text-zinc-200">
-                          {parseFloat(
-                            asteroid.close_approach_data[0]?.relative_velocity
-                              .kilometers_per_hour || "0"
-                          ).toLocaleString(undefined, { maximumFractionDigits: 0 })}{" "}
-                          km/h
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-zinc-500 text-xs">Miss Distance</div>
-                        <div className="text-zinc-200">
-                          {parseFloat(
-                            asteroid.close_approach_data[0]?.miss_distance.kilometers || "0"
-                          ).toLocaleString(undefined, { maximumFractionDigits: 0 })}{" "}
-                          km
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-zinc-500 text-xs">Approach Date</div>
-                        <div className="text-zinc-200">
-                          {asteroid.close_approach_data[0]?.close_approach_date}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
 
-            {/* Launch Simulation — desktop only; mobile has its own floating bar */}
-            {selectedAsteroid && (
-              <div className="hidden md:block p-6 border-t border-white/10 bg-black/60">
-                <button
-                  onClick={() => {
-                    if (!launched) {
-                      setLaunched(true);
-                      onStartSimulation?.();
-                    }
-                  }}
-                  disabled={launched}
-                  className={`w-full py-3 font-bold rounded-lg transition-all flex items-center justify-center gap-2 uppercase tracking-wider text-sm ${
-                    launched
-                      ? "bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700"
-                      : "bg-cyan-600 hover:bg-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.4)]"
-                  }`}
-                >
-                  <Target className="w-4 h-4" />
-                  {launched ? "Simulation Running" : "Launch Simulation"}
-                </button>
+                        {isSelected && <div className="text-[9px] text-cyan-400 font-mono shrink-0">LOCKED</div>}
+                      </div>
+                    );
+                  })
+                )}
               </div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+
+              {/* Launch button */}
+              {selectedAsteroid && (
+                <div className="px-3 pb-3">
+                  <button
+                    onClick={() => {
+                      if (!launched) { setLaunched(true); onStartSimulation?.(); }
+                      setIsOpen(false);
+                    }}
+                    disabled={launched}
+                    className={`w-full py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
+                      launched
+                        ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                        : "bg-cyan-600 hover:bg-cyan-500 text-white shadow-[0_0_20px_rgba(6,182,212,0.3)]"
+                    }`}
+                  >
+                    <Target className="w-3.5 h-3.5" />
+                    {launched ? "Simulation Running" : "Launch Simulation"}
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </>
   );
 }

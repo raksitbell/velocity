@@ -1,6 +1,6 @@
 # Velocity — Asteroid Impact Simulator
 
-> An interactive, scientifically-grounded 3D asteroid impact simulation built with Next.js and Three.js. Fetches real near-Earth object (NEO) data from NASA's NeoWs API and simulates the full impact sequence: atmospheric ablation → kinetic energy release → crater formation → shockwave → seismic event → tsunami.
+> An interactive, scientifically-grounded asteroid impact simulation built with Next.js. Fetches real near-Earth object (NEO) data from NASA's NeoWs API and simulates the full impact sequence: atmospheric entry → kinetic energy release → crater formation → shockwave → seismic event → tsunami.
 
 ---
 
@@ -8,175 +8,64 @@
 
 | Feature | Description |
 |---|---|
-| **3D Photorealistic Globe** | Multi-layered Earth (Blue Marble, bump, specular, night-lights, clouds) rendered with Three.js |
-| **Real NASA Data** | Live NEO feed via NASA NeoWs API, cached in `localStorage` for 1 hour to avoid rate limits |
-| **Clickable Impact Target** | Click anywhere on the globe surface to set a custom impact point before launch |
-| **Asteroid Telemetry HUD** | Floating label on the asteroid during flight showing velocity, mass, diameter, and T-minus countdown |
-| **Full Impact Sequence** | Flash → particle burst → expanding fireball ring → shockwave ring → persistent crater glow |
-| **7-Tab Devastation Report** | Overview, Thermal, Wave Blast, Life Effects, Crater, Seismic, Tsunami |
-| **Tactical Impact Map** | 2D dark-mode Leaflet map centered on computed impact lat/lon with fireball & shockwave circles |
-| **Scientific QA (AI)** | Ollama-powered chat assistant, works locally and via configurable URL when deployed online |
-| **Mobile-First UX** | Sidebar auto-closes on selection; floating bottom bar for Confirm → Play → Results |
+| **3D/2D D3 Globe** | Interactive globe rendered with D3.js + TopoJSON; morphs between 3D orthographic and 2D equirectangular views |
+| **Cinematic Camera** | Globe auto-rotates toward impact, zooms out during flight, and tracks the asteroid in real time |
+| **Zoom Controls** | `+` / `−` buttons and scroll-wheel zoom (40 %–400 %); drag to rotate in idle mode |
+| **Real NASA NEO Data** | Live feed via NASA NeoWs API with `localStorage` cache; auto-selects the closest approach window daily |
+| **Offline Fallback** | Automatically falls back to the bundled offline dataset when NASA rate limits hit (HTTP 429) with a non-blocking amber banner |
+| **Asteroid Selector** | Compact floating dropdown with live search, diameter, velocity, and hazard badge per object |
+| **Live Telemetry HUD** | Floats next to the asteroid dot during flight; shows altitude, velocity, mass, hull temperature, atmospheric entry warning, and **estimated target city** (reverse-geocoded from impact coordinates) |
+| **Flight Timeline** | Compact scrubber strip pinned to the bottom of the left panel — play / pause / scrub / reset |
+| **Devastation Report** | After impact: geographic 2D map, ground zero coordinates, energy, crater dimensions, fireball radius, shockwave / tsunami, casualty estimate, seismic magnitude |
+| **Tactical Impact Map** | Leaflet dark-matter map centred on impact lat/lon with fireball and shockwave overlay circles; starts zoomed out (level 3) for continental context |
+| **AI Scientific Assistant** | Ollama-powered chat about asteroid physics; works locally or via configurable tunnel URL |
+| **Settings Panel** | Configure data source (live / offline), NASA API key, daily auto-fetch; shows last sync time and manual pull button |
+| **Mobile UX** | Dropdown selector and bottom-sheet impact report; all panels adapt to small screens |
 
 ---
 
 ## 🧮 Physics & Mathematics
 
-All calculations are in [`src/lib/impactCalculator.ts`](src/lib/impactCalculator.ts).
+All calculations live in [`src/lib/impactCalculator.ts`](src/lib/impactCalculator.ts).
 
-### 1. 3D Sphere → Geographic Coordinates
+### 1. Atmospheric Ablation
 
-Converts a `THREE.Vector3` surface point to (lat, lon) using the actual `SphereGeometry` vertex equations:
+Smaller bodies lose mass to aerodynamic heating:
 
-$$x = -\cos(\phi)\sin(\theta), \quad z = \sin(\phi)\sin(\theta), \quad y = \cos(\theta)$$
-
-$$\phi = \text{atan2}(z,\ -x)$$
-
-$$\text{lat} = \arcsin(y) \cdot \frac{180}{\pi}, \qquad \text{lon} = \phi \cdot \frac{180}{\pi} - 180 \quad [\text{normalised to } {-180°…180°}]$$
-
-**Implementation:**
-```typescript
-const normalized = impactPoint.clone().normalize();
-const latRads = Math.asin(Math.max(-1, Math.min(1, normalized.y)));
-let lon = Math.atan2(normalized.z, -normalized.x) * (180 / Math.PI) - 180;
-if (lon <= -180) lon += 360;  // normalise from (-360, 0] to (-180, 180]
-const lat = latRads * (180 / Math.PI);
-```
-
----
-
-### 2. Atmospheric Ablation
-
-Smaller bodies lose mass to aerodynamic heating before reaching the surface:
-
-$$d_{\text{final}} = d_0 \cdot (1 - f_{\text{burn}})$$
-
-| Diameter | Mass loss $f_{\text{burn}}$ |
+| Diameter | Mass loss |
 |---|---|
-| $d < 50\,\text{m}$ | 70 – 95 % |
-| $50\,\text{m} \leq d < 100\,\text{m}$ | 30 – 50 % |
-| $100\,\text{m} \leq d < 1\,\text{km}$ | 5 – 15 % |
+| $d < 50\,\text{m}$ | 70–95 % |
+| $50\,\text{m} \leq d < 100\,\text{m}$ | 30–50 % |
+| $100\,\text{m} \leq d < 1\,\text{km}$ | 5–15 % |
 | $d \geq 1\,\text{km}$ | < 2 % |
 
-**Implementation:**
-```typescript
-const originalDiameterKm = asteroid.estimated_diameter.kilometers.estimated_diameter_max;
-let finalDiameterKm = originalDiameterKm;
-let burnPercentage = 0;
+### 2. Asteroid Mass
 
-if (originalDiameterKm < 0.05) {
-  burnPercentage = 70 + (Math.random() * 25); 
-} else if (originalDiameterKm < 0.1) {
-  burnPercentage = 30 + (Math.random() * 20);
-} else if (originalDiameterKm < 1.0) {
-  burnPercentage = 5 + (Math.random() * 10);
-} else {
-  burnPercentage = Math.random() * 2;
-}
+$$V = \tfrac{4}{3}\pi r^3,\quad m = V \cdot \rho \quad [\rho = 3{,}000\,\text{kg/m}^3,\ \text{rocky S-type}]$$
 
-finalDiameterKm = originalDiameterKm * (1 - (burnPercentage / 100));
-```
+### 3. Kinetic Energy
 
----
+$$E = \tfrac{1}{2}mv^2 \qquad E_{\text{MT}} = \frac{E}{4.184\times10^{15}} \quad [\text{Megatons TNT}]$$
 
-### 3. Asteroid Mass
+### 4. Crater Diameter (Collins–Melosh scaling)
 
-$$r = \frac{d_{\text{final}}}{2} \quad [\text{metres}]$$
+$$D_{\text{crater}} = 1.16\cdot E_{\text{MT}}^{1/3} \quad [\text{km}]$$
 
-$$V = \frac{4}{3}\pi r^3 \qquad m = V \cdot \rho \quad [\rho = 3000\,\text{kg/m}^3\ \text{rocky S-type}]$$
+### 5. Fireball & Shockwave Radii
 
-**Implementation:**
-```typescript
-let radiusMeters = (finalDiameterKm * 1000) / 2;
-const volumeCubicMeters = (4 / 3) * Math.PI * Math.pow(radiusMeters, 3);
-let massKg = volumeCubicMeters * ASTEROID_DENSITY; // ASTEROID_DENSITY = 3000
-```
+$$R_{\text{fireball}} = \max(0.5,\ 0.2\cdot E_{\text{MT}}^{0.4})\quad R_{\text{shockwave}} = 15\cdot R_{\text{fireball}} \quad [\text{km}]$$
 
----
+### 6. Seismic Magnitude & Radius
 
-### 4. Kinetic Energy
+$$M_w = \frac{\log_{10}(E_J) - 4.8}{1.5} \qquad R_{\text{seismic}} = 10^{(M_w - 3.5)/1.2} \quad [\text{km}]$$
 
-$$E = \frac{1}{2}mv^2 \quad [\text{Joules}]$$
+### 7. Tsunami Wave Height (ocean impacts)
 
-$$E_{\text{MT}} = \frac{E}{4.184 \times 10^{15}} \quad [\text{Megatons TNT}]$$
+$$H_{\text{max}} = \min(3{,}000,\ r_m \times 1.5) \quad [\text{metres}]$$
 
-**Implementation:**
-```typescript
-const velocityKmh = parseFloat(asteroid.close_approach_data[0]?.relative_velocity.kilometers_per_hour || "0");
-const velocityMs = (velocityKmh * 1000) / 3600;
-
-let kineticEnergyJoules = 0.5 * massKg * Math.pow(velocityMs, 2);
-let kineticEnergyMegatons = kineticEnergyJoules / 4.184e15;
-```
-
----
-
-### 5. Crater Diameter
-
-Collins–Melosh impact scaling (simplified):
-
-$$D_{\text{crater}} = 1.16 \cdot E_{\text{MT}}^{1/3} \quad [\text{km}]$$
-
-**Implementation:**
-```typescript
-const craterDiameterKm = 1.16 * Math.pow(kineticEnergyMegatons, 1/3);
-```
-
----
-
-### 6. Fireball & Shockwave Radii
-
-$$R_{\text{fireball}} = \max\!\left(0.5,\ 0.2 \cdot E_{\text{MT}}^{0.4}\right) \quad [\text{km}]$$
-
-$$R_{\text{shockwave}} = 15 \cdot R_{\text{fireball}} \quad [\text{km, structural collapse zone}]$$
-
-**Implementation:**
-```typescript
-const fireballRadiusKm = Math.max(0.5, 0.2 * Math.pow(kineticEnergyMegatons, 0.4));
-const evacuationRadiusKm = fireballRadiusKm * 15;
-```
-
----
-
-### 7. Seismic Magnitude & Radius
-
-$$M_w = \frac{\log_{10}(E_J) - 4.8}{1.5}$$
-
-$$R_{\text{seismic}} = 10^{(M_w - 3.5)\,/\,1.2} \quad [\text{km}]$$
-
-**Implementation:**
-```typescript
-const richterMagnitude = kineticEnergyJoules > 0 
-  ? parseFloat(((Math.log10(kineticEnergyJoules) - 4.8) / 1.5).toFixed(1))
-  : 0;
-const seismicRadiusKm = Math.max(0, Math.pow(10, (richterMagnitude - 3.5) / 1.2));
-```
-
----
-
-### 8. Tsunami Wave Height (ocean impacts)
-
-$$H_{\text{max}} = \min(3000,\ r_m \times 1.5) \quad [\text{metres}]$$
-
-**Implementation:**
-```typescript
-if (isWater) {
-  tsunamiHeightMeters = Math.min(3000, radiusMeters * 1.5); 
-}
-```
-
----
-
-### 9. Recurrence Period
+### 8. Recurrence Period
 
 $$T_{\text{years}} = E_{\text{MT}}^{0.8} \times 100$$
-
-**Implementation:**
-```typescript
-const recurrencePeriodYears = kineticEnergyMegatons > 0
-  ? Math.round(Math.pow(kineticEnergyMegatons, 0.8) * 100)
-  : 1;
-```
 
 ---
 
@@ -185,44 +74,42 @@ const recurrencePeriodYears = kineticEnergyMegatons > 0
 ```
 src/
 ├── app/
-│   ├── page.tsx                    # Root page — state orchestration
+│   ├── page.tsx                    # Root layout & state orchestration
 │   └── api/
 │       ├── nasa/                   # Next.js proxy → NASA NeoWs API
 │       └── ollama/generate/        # Next.js proxy → Ollama instance
-├── components/
-│   ├── scene/
-│   │   ├── Earth.tsx               # Photorealistic globe (multi-layer)
-│   │   ├── GlobeScene.tsx          # R3F Canvas + OrbitControls
-│   │   ├── AsteroidPath.tsx        # Trajectory + telemetry HUD
-│   │   ├── Asteroids.tsx           # NEO swarm visualisation
-│   │   ├── ImpactEffect.tsx        # Rings, flash, particles post-impact
-│   │   └── TargetMarker.tsx        # 3D crosshair before launch
-│   └── ui/
-│       ├── AsteroidPanel.tsx       # Left sidebar — asteroid list + launch
-│       ├── SimulationControls.tsx  # Right panel — 7-tab devastation report
-│       ├── IsometricImpactMap.tsx  # Leaflet 2D tactical map
-│       └── ScientificQA.tsx        # Ollama AI chat assistant
+├── components/ui/
+│   ├── AsteroidPanel.tsx           # Floating dropdown asteroid selector
+│   ├── SimulationControls.tsx      # Left panel — devastation report + inline timeline
+│   ├── D3GlobeMap.tsx              # D3 orthographic / equirectangular globe with cinematic camera
+│   ├── FlightTelemetryHUD.tsx      # Floating HUD anchored to the asteroid dot during flight
+│   ├── IsometricImpactMap.tsx      # Leaflet tactical impact map (post-impact)
+│   ├── MobileBottomBar.tsx         # Mobile asteroid selector + launch bar
+│   ├── ScientificQA.tsx            # Ollama AI chat assistant
+│   └── SettingsDialog.tsx          # API key, data source, auto-fetch controls
+├── hooks/
+│   ├── useSimulation.ts            # Central simulation state + rAF animation loops
+│   └── useSettings.tsx             # Settings context (localStorage-persisted)
 ├── lib/
-│   └── impactCalculator.ts         # All physics calculations
+│   └── impactCalculator.ts         # All physics & scaling-law calculations
 └── services/
-    ├── nasaService.ts              # NASA API + localStorage cache (1 h TTL)
-    └── ollamaService.ts            # Dual-channel Ollama (direct + proxy)
+    ├── nasaService.ts              # NASA NeoWs API + localStorage cache + offline fallback
+    └── ollamaService.ts            # Dual-channel Ollama (direct browser + server proxy)
 ```
 
 ---
 
 ## 🛠️ Tech Stack
 
-| Layer | Library / Tool |
+| Layer | Library |
 |---|---|
-| Framework | [Next.js 15](https://nextjs.org/) (App Router, Turbopack) |
-| 3D Rendering | [Three.js](https://threejs.org/), [React Three Fiber](https://docs.pmnd.rs/react-three-fiber), [Drei](https://github.com/pmndrs/drei) |
+| Framework | [Next.js 16](https://nextjs.org/) (App Router, Turbopack) |
+| Globe / Maps | [D3.js](https://d3js.org/), [TopoJSON](https://github.com/topojson/topojson), [Leaflet](https://leafletjs.com/) |
 | Animation | [Framer Motion](https://www.framer.com/motion/) |
-| 2D Map | [Leaflet](https://leafletjs.com/) + CartoDB Dark Matter tiles |
 | Styling | [Tailwind CSS](https://tailwindcss.com/) |
 | Icons | [Lucide React](https://lucide.dev/) |
-| AI | [Ollama](https://ollama.com/) (`llama3` or any local model) |
-| Data Source | [NASA NeoWs API](https://api.nasa.gov/) |
+| AI | [Ollama](https://ollama.com/) (any local model, e.g. `llama3`) |
+| Data | [NASA NeoWs API](https://api.nasa.gov/) + bundled offline JSON |
 
 ---
 
@@ -230,7 +117,6 @@ src/
 
 ### Prerequisites
 - Node.js ≥ 18
-- npm / yarn / pnpm
 
 ### 1. Clone & Install
 
@@ -245,25 +131,29 @@ npm install
 Create `.env.local`:
 
 ```env
-# Required — free key at https://api.nasa.gov/
+# Optional — free key at https://api.nasa.gov/ (defaults to DEMO_KEY with rate limits)
 NEXT_PUBLIC_NASA_API_KEY=your_nasa_api_key_here
 
-# Optional — Ollama base URL for server-side proxy
+# Optional — Ollama base URL for the server-side proxy
 OLLAMA_BASE_URL=https://your-ollama-tunnel.example.com
 
 # Optional — Ollama URL exposed to the browser (for direct calls)
 NEXT_PUBLIC_OLLAMA_URL=https://your-ollama-tunnel.example.com
 ```
 
-### 3. Run Development Server
+> **Tip:** If you don't set a NASA API key the app uses `DEMO_KEY`, which has tight hourly rate limits. When the limit is hit the app automatically switches to the bundled offline dataset and shows a banner. You can always set your own key in the in-app **Settings** panel without redeploying.
+
+### 3. Run
 
 ```bash
-npm run dev
+npm run dev      # development (Turbopack)
+npm run build    # production build
+npm run start    # serve production build
 ```
 
 Visit [http://localhost:3000](http://localhost:3000).
 
-### 4. Ollama Setup (AI Assistant)
+### 4. AI Assistant (optional)
 
 ```bash
 # Install Ollama: https://ollama.com/download
@@ -272,29 +162,17 @@ ollama run llama3
 
 ---
 
-## 🌐 Online Deployment + Local Ollama
+## 🌐 Deploying with Local Ollama
 
-When deployed online but Ollama runs locally:
+Expose your local Ollama via a tunnel so the deployed app can reach it:
 
 ```bash
-# Expose local Ollama via ngrok
 ngrok http 11434
-# or Cloudflare Tunnel
+# or
 cloudflared tunnel --url http://localhost:11434
 ```
 
-Then set `OLLAMA_BASE_URL` in your hosting environment (e.g. Vercel → Settings → Environment Variables), or paste the tunnel URL directly in the in-app AI settings — it's stored in `localStorage` and used for direct browser calls without needing a redeploy.
-
----
-
-## 🧪 Scripts
-
-| Command | Description |
-|---|---|
-| `npm run dev` | Start dev server (Turbopack) |
-| `npm run build` | Production build |
-| `npm run start` | Serve production build |
-| `npm run lint` | ESLint check |
+Paste the tunnel URL into **Settings → Ollama URL** in the app — it's saved in `localStorage`, no redeploy needed.
 
 ---
 

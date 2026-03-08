@@ -79,11 +79,11 @@ export function SimulationControls({
   startDate.setDate(startDate.getDate() - 30);
   const currentDate = new Date(startDate.getTime() + (approachDate.getTime() - startDate.getTime()) * progress);
 
-  // Mobile: hide entirely during animation, slide up as bottom sheet after impact
-  // Desktop: always show as right panel
+  // Mobile: bottom sheet after impact
+  // Desktop: always show as LEFT panel
   const mobileClass = progress >= 1
-    ? "fixed bottom-0 left-0 right-0 max-h-[75vh] md:max-h-none w-full rounded-t-2xl md:rounded-none md:top-0 md:right-0 md:bottom-auto md:left-auto md:h-full md:w-[450px]"
-    : "hidden md:flex md:fixed md:top-0 md:right-0 md:h-full md:w-[450px]";
+    ? "fixed bottom-0 left-0 right-0 max-h-[50vh] md:max-h-none w-full rounded-t-2xl md:rounded-none md:top-0 md:left-0 md:bottom-auto md:right-auto md:h-full md:w-[420px]"
+    : "hidden md:flex md:fixed md:top-0 md:left-0 md:h-full md:w-[420px]";
 
   return (
     <AnimatePresence>
@@ -91,80 +91,31 @@ export function SimulationControls({
         initial={{ y: 60, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: 60, opacity: 0 }}
-        className={`${mobileClass} bg-black/60 backdrop-blur-2xl border-l border-white/10 md:border-t-0 border-t z-30 flex flex-col shadow-2xl overflow-hidden`}
+        className={`${mobileClass} bg-zinc-950/85 backdrop-blur-2xl border-r border-white/10 z-30 flex flex-col shadow-2xl overflow-hidden`}
       >
-        {/* Header */}
-        <div className="p-6 border-b border-white/10 flex items-center justify-between shrink-0 bg-black/40">
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${progress >= 1 ? 'bg-red-500/20 text-red-400' : 'bg-cyan-500/20 text-cyan-400'}`}>
-              <Crosshair className={`w-5 h-5 ${progress < 1 ? 'animate-pulse' : ''}`} />
-            </div>
-            <div>
-              <h3 className="text-white font-bold">{selectedAsteroid.name}</h3>
-              <p className={`text-xs md:text-sm font-medium ${progress >= 1 ? 'text-red-400' : 'text-zinc-400'}`}>
-                {progress >= 1 ? 'IMPACT CONFIRMED / DEVASTATION REPORT' : 'Target Locked • Simulating Trajectory'}
-              </p>
-            </div>
-          </div>
+        {/* Drag handle on mobile / spacer on desktop */}
+        <div className="md:hidden flex justify-center py-2 shrink-0">
+          <div className="w-10 h-1 rounded-full bg-white/20" />
         </div>
+        <div className="hidden md:block h-[68px] shrink-0" />
 
-        {/* Playback Controls (Timeline) */}
-        <div className="p-6 border-b border-white/10 bg-black/20 shrink-0">
-          <div className="flex items-center justify-between mb-4">
-            <div className="text-zinc-400 text-xs uppercase tracking-wider font-semibold">Timeline Scrubber</div>
-            <div className={`font-mono text-sm font-bold ${progress >=1 ? 'text-red-400' : 'text-white'}`}>{format(currentDate, "MMM dd, yyyy")}</div>
+        {/* Header */}
+        <div className="px-4 py-3 border-b border-white/10 flex items-center gap-3 shrink-0 bg-black/20">
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors shrink-0 ${progress >= 1 ? 'bg-red-500/20 text-red-400' : 'bg-cyan-500/20 text-cyan-400'}`}>
+            <Crosshair className={`w-4 h-4 ${progress < 1 ? 'animate-pulse' : ''}`} />
           </div>
-          
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setIsPlaying(!isPlaying)}
-              disabled={progress >= 1}
-              className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors shrink-0 ${
-                progress >= 1 
-                  ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed' 
-                  : 'bg-white text-black hover:bg-zinc-200'
-              }`}
-            >
-              {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-1" />}
-            </button>
-            <button
-              onClick={onReset}
-              className="w-8 h-8 rounded-full border border-white/20 text-white flex items-center justify-center hover:bg-white/10 transition-colors shrink-0"
-              title="Reset Simulation"
-            >
-              <RotateCcw className="w-3 h-3" />
-            </button>
-
-            <div className="relative flex-1 group">
-              <input 
-                type="range" 
-                min="0" 
-                max="1" 
-                step="0.001" 
-                value={progress}
-                onChange={(e) => {
-                  setIsPlaying(false);
-                  setProgress(parseFloat(e.target.value));
-                }}
-                className={`w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:scale-125 transition-all ${
-                  progress >= 1 ? '[&::-webkit-slider-thumb]:bg-red-500' : '[&::-webkit-slider-thumb]:bg-cyan-500'
-                }`}
-              />
-              <div 
-                className={`absolute top-1/2 -translate-y-1/2 left-0 h-1.5 rounded-l-lg pointer-events-none ${
-                  progress >= 1 ? 'bg-gradient-to-r from-red-600 to-red-400' : 'bg-gradient-to-r from-cyan-500 to-blue-500'
-                }`}
-                style={{ width: `${progress * 100}%` }}
-              />
-            </div>
+          <div className="min-w-0">
+            <h3 className="text-white font-semibold text-sm truncate">{selectedAsteroid.name}</h3>
+            <p className={`text-[10px] font-medium truncate ${progress >= 1 ? 'text-red-400' : 'text-zinc-500'}`}>
+              {progress >= 1 ? 'Impact Confirmed · Devastation Report' : 'Target Locked · Simulating Trajectory'}
+            </p>
           </div>
         </div>
 
         {/* Overview Interface - all metrics stacked */}
-        {progress >= 1 && metrics && (
+        {progress >= 1 && metrics ? (
           <div className="flex flex-col flex-1 overflow-hidden">
-            {/* Scrollable Content */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-white/10 pb-20">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-white/10 pb-4">
               <div className="flex flex-col gap-6">
 
                 {/* 1. Overview */}
@@ -396,7 +347,54 @@ export function SimulationControls({
               </div>
             </div>
           </div>
+        ) : (
+          // When no impact yet — center-fill to push footer to bottom
+          <div className="flex-1" />
         )}
+
+        {/* ── Compact Timeline Footer – always pinned to bottom ── */}
+        <div className="shrink-0 border-t border-white/10 bg-black/30 px-4 py-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsPlaying(!isPlaying)}
+              disabled={progress >= 1}
+              className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors shrink-0 ${
+                progress >= 1
+                  ? 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
+                  : 'bg-white text-black hover:bg-zinc-200'
+              }`}
+            >
+              {isPlaying ? <Pause className="w-3.5 h-3.5 fill-current" /> : <Play className="w-3.5 h-3.5 fill-current ml-0.5" />}
+            </button>
+            <button
+              onClick={onReset}
+              className="w-7 h-7 rounded-full border border-white/20 text-zinc-400 flex items-center justify-center hover:bg-white/10 hover:text-white transition-colors shrink-0"
+              title="Reset"
+            >
+              <RotateCcw className="w-3 h-3" />
+            </button>
+            <div className="relative flex-1">
+              <input
+                type="range" min="0" max="1" step="0.001" value={progress}
+                onChange={(e) => { setIsPlaying(false); setProgress(parseFloat(e.target.value)); }}
+                className={`w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full ${
+                  progress >= 1 ? '[&::-webkit-slider-thumb]:bg-red-500' : '[&::-webkit-slider-thumb]:bg-cyan-500'
+                }`}
+              />
+              <div
+                className={`absolute top-1/2 -translate-y-1/2 left-0 h-1 rounded-l-lg pointer-events-none ${
+                  progress >= 1 ? 'bg-gradient-to-r from-red-600 to-red-400' : 'bg-gradient-to-r from-cyan-500 to-blue-500'
+                }`}
+                style={{ width: `${progress * 100}%` }}
+              />
+            </div>
+            <div className={`font-mono text-[10px] font-bold shrink-0 tabular-nums ${
+              progress >= 1 ? 'text-red-400' : 'text-zinc-400'
+            }`}>
+              {format(currentDate, "MMM dd'yy")}
+            </div>
+          </div>
+        </div>
 
       </motion.div>
     </AnimatePresence>
